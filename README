@@ -1,0 +1,19 @@
+# 🔥 PeltierLab
+
+Simulación térmica de sistemas Peltier con:
+
+- PID
+- FOPID
+- Hysteresis
+
+## 🚀 Ejecutar online
+
+Pulsa aquí:
+
+https://mybinder.org/v2/gh/TU_USUARIO/peltierlab/HEAD
+
+## 📓 Notebooks
+
+- examples/hyster.ipynb
+- examples/pid.ipynb
+- examples/fopid.ipynb
