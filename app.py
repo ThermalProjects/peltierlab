@@ -29,7 +29,7 @@ mu_default = 1.47
 # -------------------------------
 # Title
 # -------------------------------
-st.title("🔥 PeltierLab Interactive Simulator")
+st.title("❄️ PeltierLab Interactive Simulator")
 st.markdown(
     "Explore thermoelectric system behavior using **PID, FOPID, and Hysteresis control strategies**."
 )
@@ -50,7 +50,7 @@ mode = st.sidebar.selectbox(
 if mode in ["PID", "FOPID"]:
     st.sidebar.subheader("🎯 Control Parameters")
 
-    T_set = st.sidebar.slider("Setpoint [°C]", 5.0, 25.0, 12.0, 0.1)
+    T_set = st.sidebar.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
     bias = st.sidebar.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
 
     Kp = st.sidebar.slider("Kp", 0, 200, int(Kp_default), 1)
@@ -65,9 +65,9 @@ if mode in ["PID", "FOPID"]:
 elif mode == "Hysteresis":
     st.sidebar.subheader("🎯 ON/OFF Control")
 
-    T_set = st.sidebar.slider("Setpoint [°C]", 10.0, 20.0, 12.0, 0.1)
-    dT1 = st.sidebar.slider("Upper band (dT1) [°C]", 0.1, 2.0, 0.5, 0.1)
-    dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 2.0, 0.5, 0.1)
+    T_set = st.sidebar.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
+    dT1 = st.sidebar.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
+    dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
 # Simulation (auto-run)
@@ -104,7 +104,7 @@ if mode in ["PID", "FOPID"]:
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(t_new, Tc_sim, linewidth=2, label="Temperature")
-    ax.axhline(T_set, linestyle="--", label="Setpoint")
+    ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 
 # Hysteresis
 elif mode == "Hysteresis":
@@ -121,7 +121,7 @@ elif mode == "Hysteresis":
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(t_new, Tc, linewidth=2, label="Temperature")
-    ax.axhline(T_set, linestyle="--", label="Setpoint")
+    ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 
 # -------------------------------
 # Common formatting
