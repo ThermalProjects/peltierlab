@@ -1,4 +1,4 @@
-# app_real_time.py
+# app_real_time_optimized.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,22 +30,17 @@ mu_default = 1.47
 # -------------------------------
 # Title
 # -------------------------------
-st.title("❄️ PeltierLab Interactive Simulator (Real-Time)")
-st.markdown(
-    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
-)
+st.title("❄️ PeltierLab Real-Time Simulator")
+st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies in real-time.")
 
 # -------------------------------
-# SIDEBAR (controls)
+# Sidebar controls
 # -------------------------------
 st.sidebar.header("Settings")
-
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+duration = st.sidebar.slider("Simulation duration [s]", 50, 500, 300, step=10)
 
-# -------------------------------
-# Dynamic sliders
-# -------------------------------
+# Control parameters
 if mode in ["PID", "FOPID"]:
     st.sidebar.subheader("Control Parameters")
     T_set = st.sidebar.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
@@ -76,38 +71,16 @@ plot_placeholder = st.empty()
 if start_sim:
     st.subheader(f"Results: {mode} (Real-Time)")
 
-    # Time vector
-    t_new = np.linspace(0, duration, duration)
-    
     # Initialize simulator
     if mode in ["PID", "FOPID"]:
         sim = Simulator(best_params, T_start=T_start)
-        Tc_sim, pwm_sim = sim.simulate_3nodes_FOPID(
-            t_custom=t_new,
-            T_set=T_set,
-            Kp=Kp,
-            Ki=Ki,
-            Kd=Kd,
-            bias=bias,
-            lam=lam if mode=="FOPID" else lambda_default,
-            mu=mu if mode=="FOPID" else mu_default
-        )
-        y = Tc_sim
     else:
         sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-        Tc, Tm, Th, pwm = sim.simulate(
-            t_custom=t_new,
-            T_set=T_set,
-            dT1=dT1,
-            dT2=dT2,
-            P_max=5.0
-        )
-        y = Tc
 
-    # Real-time plotting
-    fig, ax = plt.subplots(figsize=(8,4))
+    # Initialize plot
+    fig, ax = plt.subplots(figsize=(8, 4))
     ax.set_xlim(0, duration)
-    ax.set_ylim(min(y)-1, max(y)+1)
+    ax.set_ylim(T_start-5, T_set+5)
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Temperature [°C]")
     ax.set_title(f"{mode} Control Simulation")
@@ -116,18 +89,46 @@ if start_sim:
     line, = ax.plot([], [], color="blue", linewidth=2, label="Temperature")
     ax.legend(fontsize=9)
 
-    temp_data = []
-    for i in range(len(y)):
-        temp_data.append(y[i])
-        line.set_data(t_new[:i+1], temp_data)
+    temps = []
+    times = []
+
+    # -------------------------------
+    # Real-time simulation loop
+    # -------------------------------
+    for t in range(duration):
+        times.append(t)
+        if mode in ["PID", "FOPID"]:
+            Tc_sim, _ = sim.simulate_3nodes_FOPID(
+                t_custom=np.array([0, 1]),
+                T_set=T_set,
+                Kp=Kp,
+                Ki=Ki,
+                Kd=Kd,
+                bias=bias,
+                lam=lam if mode=="FOPID" else lambda_default,
+                mu=mu if mode=="FOPID" else mu_default
+            )
+            temps.append(Tc_sim[-1])
+        else:
+            Tc, _, _, _ = sim.simulate(
+                t_custom=np.array([0, 1]),
+                T_set=T_set,
+                dT1=dT1,
+                dT2=dT2,
+                P_max=5.0
+            )
+            temps.append(Tc[-1])
+
+        line.set_data(times, temps)
         plot_placeholder.pyplot(fig)
-        time.sleep(0.02)  # pausa para animación (~50fps)
-    
+        time.sleep(1)  # Actual "1 second per step"
+
     # -------------------------------
-    # Metrics after simulation
+    # Metrics
     # -------------------------------
-    error = y - T_set
-    settling_time = next((t_new[i] for i in range(len(y)) if np.all(np.abs(y[i:] - T_set) <= 0.5)), None)
+    temps_array = np.array(temps)
+    error = temps_array - T_set
+    settling_time = next((times[i] for i in range(len(temps_array)) if np.all(np.abs(temps_array[i:] - T_set) <= 0.5)), None)
     ss_error = np.mean(error[-50:])
     rmse = np.sqrt(np.mean(error**2))
 
