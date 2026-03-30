@@ -33,11 +33,12 @@ st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hyster
 # Sidebar (compact)
 # -------------------------------
 st.sidebar.header("Settings")
-st.sidebar.markdown("<style>div.row-widget.stSlider{margin-bottom: 0.5rem;}</style>", unsafe_allow_html=True)
+st.sidebar.markdown("<style>div.row-widget.stSlider{margin-bottom:0.3rem;}</style>", unsafe_allow_html=True)
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 duration = st.sidebar.slider("Simulation duration [s]", 50, 500, 300, 10)
 
+# Control params
 if mode in ["PID", "FOPID"]:
     st.sidebar.subheader("Control Parameters")
     T_set = st.sidebar.slider("Setpoint [°C]", 0.0, 20.0, 12.0, 0.1)
@@ -62,11 +63,8 @@ if 'running' not in st.session_state:
     st.session_state.running = False
     st.session_state.time_elapsed = 0
 
-col1, col2 = st.columns([1,1])
-with col1:
-    start_stop_btn = st.button("Start" if not st.session_state.running else "Stop")
-with col2:
-    time_text = st.empty()
+start_stop_btn = st.sidebar.button("Start" if not st.session_state.running else "Stop")
+time_text = st.sidebar.empty()
 
 if start_stop_btn:
     st.session_state.running = not st.session_state.running
@@ -74,9 +72,9 @@ if start_stop_btn:
         st.session_state.time_elapsed = 0
 
 # -------------------------------
-# Simulation (precompute)
+# Simulation data
 # -------------------------------
-t_new = np.linspace(0, duration, duration*4 + 1)  # 4 fps
+t_new = np.linspace(0, duration, duration*4 + 1)  # 4 FPS
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
     Tc_sim, _ = sim.simulate_3nodes_FOPID(
@@ -96,16 +94,16 @@ else:
 # Placeholder for matplotlib figure
 # -------------------------------
 fig_placeholder = st.empty()
-fig, ax = plt.subplots(figsize=(8,4))
+fig, ax = plt.subplots(figsize=(6,3))  # más pequeño
 ax.set_xlim(0, duration)
 ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=10)
-ax.set_ylabel("Temperature [°C]", fontsize=10)
-ax.tick_params(axis='both', labelsize=8)
+ax.set_xlabel("Time [s]", fontsize=8)
+ax.set_ylabel("Temperature [°C]", fontsize=8)
+ax.tick_params(axis='both', labelsize=7)
 ax.grid(True, linestyle='--', alpha=0.5)
-line, = ax.plot([], [], color='blue', linewidth=1.5, label="Temperature")
+line, = ax.plot([], [], color='blue', linewidth=1.2, label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", linewidth=1, label="Setpoint")
-ax.legend(fontsize=8)
+ax.legend(fontsize=7)
 fig_placeholder.pyplot(fig)
 
 # -------------------------------
@@ -114,9 +112,17 @@ fig_placeholder.pyplot(fig)
 x_data, y_data = [], []
 
 if st.session_state.running:
+    start_time = time.time()
     for i in range(len(t_new)):
         if not st.session_state.running:
             break
+        # Calcular tiempo real transcurrido
+        elapsed = time.time() - start_time
+        expected = t_new[i]
+        # Espera si el loop va más rápido que tiempo real
+        if elapsed < expected:
+            time.sleep(expected - elapsed)
+
         x_data.append(t_new[i])
         y_data.append(y_sim[i])
         line.set_data(x_data, y_data)
@@ -124,7 +130,6 @@ if st.session_state.running:
         fig_placeholder.pyplot(fig)
         st.session_state.time_elapsed = t_new[i]
         time_text.text(f"Time elapsed: {t_new[i]:.1f} s")
-        time.sleep(0.25)  # 4 frames per second
 
 # -------------------------------
 # Metrics & Recommendations
@@ -149,8 +154,8 @@ with st.expander("Model Information & Metrics", expanded=True):
 
     st.markdown("### Quick Recommendations")
     if ss_error is not None and abs(ss_error) > 0.5:
-        st.warning("High steady-state error → consider adjusting Ki (or λ for FOPID).")
+        st.warning("High steady-state error → adjust Ki (or λ for FOPID).")
     if settling_time is not None and settling_time > duration/2:
-        st.info("Slow settling time → consider increasing Kp or adjusting Ki/Kd.")
+        st.info("Slow settling → consider increasing Kp or adjusting Ki/Kd.")
     if rmse is not None and rmse < 1:
         st.success("Overall accuracy is good (low RMSE).")
