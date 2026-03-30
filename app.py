@@ -28,44 +28,40 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Session state initialization
-# -------------------------------
-if 'running' not in st.session_state:
-    st.session_state['running'] = False
-if 'current_index' not in st.session_state:
-    st.session_state['current_index'] = 0
-if 'last_update' not in st.session_state:
-    st.session_state['last_update'] = time.time()
-
-# -------------------------------
 # Title
 # -------------------------------
-st.markdown("<h2>❄️ PeltierLab Simulator</h2>", unsafe_allow_html=True)
+st.markdown("## ❄️ PeltierLab Simulator", unsafe_allow_html=True)
 st.markdown(
-    "<small>Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control.</small>",
-    unsafe_allow_html=True
+    "Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control."
 )
 
 # -------------------------------
 # Sidebar controls
 # -------------------------------
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
 # Start/Stop button
-start_stop = st.sidebar.button(
-    "Stop" if st.session_state['running'] else "Start"
-)
-if start_stop:
-    st.session_state['running'] = not st.session_state['running']
+if 'running' not in st.session_state:
+    st.session_state.running = False
+if 'current_index' not in st.session_state:
+    st.session_state.current_index = 0
+if 'last_update' not in st.session_state:
+    st.session_state.last_update = time.time()
 
-# Time slider to jump forward/backward
-time_slider = st.sidebar.slider("Simulation time [s]",
-                                0, duration, st.session_state['current_index'], 1)
+if st.sidebar.button("Start" if not st.session_state.running else "Stop"):
+    st.session_state.running = not st.session_state.running
+    if st.session_state.running:
+        st.session_state.last_update = time.time()
 
-# -------------------------------
+# Elapsed time
+elapsed_placeholder = st.sidebar.empty()
+# PWM placeholders
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
+
 # Control parameters
-# -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
         T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
@@ -82,7 +78,7 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Prepare simulation
+# Prepare simulation data
 # -------------------------------
 t_full = np.linspace(0, duration, duration + 1)
 
@@ -105,7 +101,13 @@ elif mode == "Hysteresis":
     )
 
 # -------------------------------
-# Plot
+# Time slider to "see the future"
+# -------------------------------
+time_slider = st.sidebar.slider("Simulation time [s]", 0, duration, st.session_state.current_index, 1)
+st.session_state.current_index = time_slider
+
+# -------------------------------
+# Plot placeholders
 # -------------------------------
 st.subheader(f"Results: {mode}")
 fig, ax = plt.subplots(figsize=(7, 3.5))
@@ -121,55 +123,51 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics
+# Metrics & recommendations
 # -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
 metrics_text = info_expander.empty()
 
 # -------------------------------
-# Update loop
+# Update simulation
 # -------------------------------
-# Determine which index to show
-if st.session_state['running']:
-    # Advance time
+fps = 4
+interval = 1.0 / fps
+if st.session_state.running:
     now = time.time()
-    elapsed_since_last = now - st.session_state['last_update']
-    if elapsed_since_last >= 0.25:  # 4 FPS
-        st.session_state['current_index'] += 1
-        st.session_state['last_update'] = now
-else:
-    # Jump with slider
-    st.session_state['current_index'] = time_slider
+    dt = now - st.session_state.last_update
+    if dt >= interval:
+        if st.session_state.current_index < len(t_full) - 1:
+            st.session_state.current_index += 1
+        st.session_state.last_update = now
 
-# Limit index
-idx = min(st.session_state['current_index'], len(t_full) - 1)
+idx = st.session_state.current_index
+y_data = Tc_full[:idx+1]
+t_data = t_full[:idx+1]
 
-# -------------------------------
-# Update plot
-# -------------------------------
-line.set_data(t_full[:idx+1], Tc_full[:idx+1])
+# Update line
+line.set_data(t_data, y_data)
 plot_placeholder.pyplot(fig)
 
-# -------------------------------
-# Update time & PWM
-# -------------------------------
-st.sidebar.markdown(f"**Time elapsed:** {int(t_full[idx])} s")
-st.sidebar.markdown(f"**PWM:** {pwm_full[idx]:.1f}")
-st.sidebar.progress(int(pwm_full[idx]/255*100))
+# Update elapsed time
+elapsed_placeholder.markdown(f"**Time elapsed:** {idx} s")
 
-# -------------------------------
-# Update metrics & recommendations
-# -------------------------------
-error = Tc_full[:idx+1] - T_set
+# Update PWM
+pwm_placeholder.markdown(f"**PWM:** {pwm_full[idx]:.1f}")
+pwm_bar.progress(int(pwm_full[idx]/255*100))
+
+# Update metrics
+error = y_data - T_set
 ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
 rmse = np.sqrt(np.mean(error**2))
-settling_time = next((t_full[j] for j in range(len(error)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
 
 recs = []
 if abs(ss_error) > 0.5:
     recs.append("Consider tuning controller to reduce steady-state error.")
 if settling_time is None or settling_time > 150:
     recs.append("Slow response → consider increasing gains for faster settling.")
+
 metrics_text.markdown(
     f"**Steady-state error:** {ss_error:.3f} °C  \n"
     f"**RMSE:** {rmse:.3f}  \n"
