@@ -18,7 +18,8 @@ st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
 # -------------------------------
 st.sidebar.markdown("### ❄️ PeltierLab Simulator")
 st.sidebar.markdown(
-    "Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control."
+    "<span style='font-size:10px'>Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control.</span>",
+    unsafe_allow_html=True
 )
 
 # -------------------------------
@@ -59,7 +60,7 @@ elif mode == "Hysteresis":
     dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, step=0.1)
 
 # -------------------------------
-# Start/Stop button
+# Start/Stop button & elapsed
 # -------------------------------
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -118,71 +119,81 @@ ax_pwm.tick_params(axis='both', labelsize=6)
 ax_pwm.grid(True, linestyle='--', alpha=0.3)
 line_pwm, = ax_pwm.plot([], [], color="green", linewidth=1.2, label="PWM")
 
+# Render initial empty plot
 sim_placeholder.pyplot(fig)
 
 # -------------------------------
-# Real-time simulation loop
+# Real-time simulation loop (solo si Start)
 # -------------------------------
-t_vals, y_vals, pwm_vals = [], [], []
+if st.session_state.running:
+    t_vals, y_vals, pwm_vals = [], [], []
+    fps = 4
+    dt = 1/fps
+    total_steps = int(duration/dt)
 
-fps = 4
-dt = 1/fps
-total_steps = int(duration/dt)
+    for step in range(total_steps):
+        if not st.session_state.running:
+            break
 
-for step in range(total_steps):
-    if not st.session_state.running:
-        break
+        t_current = step*dt
 
-    t_current = step*dt
+        # Compute temp & pwm
+        if mode == "PID":
+            Tc, pwm = sim.simulate_3nodes_FOPID(np.array([0,t_current]), T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+                                                bias=bias, lam=lambda_default, mu=mu_default)
+            y_new = Tc[-1]
+            pwm_new = pwm[-1]
+        elif mode == "FOPID":
+            Tc, pwm = sim.simulate_3nodes_FOPID(np.array([0,t_current]), T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+                                                bias=bias, lam=lam, mu=mu)
+            y_new = Tc[-1]
+            pwm_new = pwm[-1]
+        else:
+            Tc, Tm, Th, pwm = sim.simulate(np.array([0,t_current]), T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0)
+            y_new = Tc[-1]
+            pwm_new = pwm[-1]
 
-    # Compute temp & pwm
-    if mode == "PID":
-        Tc, pwm = sim.simulate_3nodes_FOPID(np.array([0,t_current]), T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-                                            bias=bias, lam=lambda_default, mu=mu_default)
-        y_new = Tc[-1]
-        pwm_new = pwm[-1]
-    elif mode == "FOPID":
-        Tc, pwm = sim.simulate_3nodes_FOPID(np.array([0,t_current]), T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-                                            bias=bias, lam=lam, mu=mu)
-        y_new = Tc[-1]
-        pwm_new = pwm[-1]
-    else:
-        Tc, Tm, Th, pwm = sim.simulate(np.array([0,t_current]), T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0)
-        y_new = Tc[-1]
-        pwm_new = pwm[-1]
+        t_vals.append(t_current)
+        y_vals.append(y_new)
+        pwm_vals.append(pwm_new)
 
-    t_vals.append(t_current)
-    y_vals.append(y_new)
-    pwm_vals.append(pwm_new)
+        # Update plots
+        line_temp.set_data(t_vals, y_vals)
+        line_pwm.set_data(t_vals, pwm_vals)
+        sim_placeholder.pyplot(fig)
 
-    # Update plots
-    line_temp.set_data(t_vals, y_vals)
-    line_pwm.set_data(t_vals, pwm_vals)
-    sim_placeholder.pyplot(fig)
+        # -------------------------------
+        # Update metrics (real-time)
+        error = np.array(y_vals)-T_set
+        ss_error = np.mean(error[-min(len(error), int(fps*10)):])
+        rmse = np.sqrt(np.mean(error**2))
+        settling_time = next((t_vals[i] for i in range(len(y_vals)) if np.all(np.abs(error[i:]) <= 0.5)), None)
 
-    # Update metrics
-    error = np.array(y_vals)-T_set
-    ss_error = np.mean(error[-min(len(error), int(fps*10)):])
-    rmse = np.sqrt(np.mean(error**2))
-    settling_time = next((t_vals[i] for i in range(len(y_vals)) if np.all(np.abs(error[i:]) <= 0.5)), None)
-    metrics_placeholder.markdown(
-        f"**Metrics (real-time):**\n- Settling time: {settling_time if settling_time else 'Not reached'} s\n"
-        f"- Steady-state error: {ss_error:.2f} °C\n- RMSE: {rmse:.2f} °C"
-    )
+        metrics_placeholder.markdown(
+            f"**Metrics (real-time):**\n- Settling time: {settling_time if settling_time else 'Not reached'} s\n"
+            f"- Steady-state error: {ss_error:.2f} °C\n- RMSE: {rmse:.2f} °C"
+        )
 
-    # Update recommendations
-    reco_text = ""
-    if mode in ["PID","FOPID"]:
-        if Kp>100: reco_text+="- Kp alto → overshoot, reducir Kp\n"
-        if Kp<20: reco_text+="- Kp bajo → respuesta lenta, aumentar Kp\n"
-        if mode=="FOPID":
-            if lam>1.2: reco_text+="- λ alto → más precisión\n"
-            if mu<0.5: reco_text+="- μ bajo → respuesta más lenta\n"
-    reco_placeholder.markdown("**Recommendations:**\n"+reco_text)
+        # -------------------------------
+        # Recommendations
+        reco_text = ""
+        if mode in ["PID","FOPID"]:
+            if Kp>100: reco_text+="- Kp alto → overshoot, reducir Kp\n"
+            if Kp<20: reco_text+="- Kp bajo → respuesta lenta, aumentar Kp\n"
+            if Ki>25: reco_text+="- Ki alto → puede generar oscilaciones\n"
+            if Ki<2: reco_text+="- Ki bajo → error persistente\n"
+            if mode=="FOPID":
+                if lam>1.2: reco_text+="- λ alto → mayor precisión\n"
+                if lam<0.5: reco_text+="- λ bajo → respuesta más lenta\n"
+                if mu>1.5: reco_text+="- μ alto → posible overshoot\n"
+                if mu<0.5: reco_text+="- μ bajo → respuesta lenta\n"
+        reco_placeholder.markdown("**Recommendations:**\n"+reco_text)
 
-    # Update elapsed time
-    if st.session_state.start_time:
-        elapsed = time.time()-st.session_state.start_time
-        time_placeholder.markdown(f"Time elapsed: {int(elapsed)} s")
+        # -------------------------------
+        # Update elapsed time
+        if st.session_state.start_time:
+            elapsed = time.time()-st.session_state.start_time
+            time_placeholder.markdown(f"Time elapsed: {int(elapsed)} s")
 
-    time.sleep(dt)
+        # Real-time frame
+        time.sleep(dt)
