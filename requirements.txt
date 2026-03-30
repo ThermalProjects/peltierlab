@@ -1,7 +1,5 @@
+streamlit
 numpy
 matplotlib
-ipywidgets
-scipy
 pandas
 scikit-learn
-ipympl
