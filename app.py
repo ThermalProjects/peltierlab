@@ -2,6 +2,7 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 import time
 
 from peltierlab.core.simulator import Simulator
@@ -10,9 +11,14 @@ from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 # -------------------------------
 # Page config
 # -------------------------------
-st.set_page_config(
-    page_title="PeltierLab Simulator",
-    layout="wide"
+st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
+
+# -------------------------------
+# Mini title in sidebar
+# -------------------------------
+st.sidebar.markdown("### ❄️ PeltierLab Simulator")
+st.sidebar.markdown(
+    "Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control."
 )
 
 # -------------------------------
@@ -28,142 +34,155 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Sidebar - compacta
+# Sidebar settings
 # -------------------------------
-st.sidebar.markdown("<h3 style='font-size:20px'>❄️ PeltierLab Simulator</h3>", unsafe_allow_html=True)
+st.sidebar.header("Settings")
+mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"], index=0)
+duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-
+# Compact sliders
 if mode in ["PID", "FOPID"]:
-    T_set = st.sidebar.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
-    bias = st.sidebar.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-    Kp = st.sidebar.slider("Kp", 0, 200, int(Kp_default), 1)
-    Ki = st.sidebar.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
-    Kd = st.sidebar.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+    st.sidebar.subheader("Control Parameters")
+    T_set = st.sidebar.slider("Setpoint [°C]", 5.0, 20.0, 12.0, step=0.1)
+    bias = st.sidebar.slider("Bias [°C]", -2.0, 2.0, 0.0, step=0.1)
+    Kp = st.sidebar.slider("Kp", 0, 200, int(Kp_default), step=1)
+    Ki = st.sidebar.slider("Ki", 0.0, 50.0, Ki_default, step=0.1)
+    Kd = st.sidebar.slider("Kd", 0.0, 50.0, Kd_default, step=0.1)
     if mode == "FOPID":
-        lam = st.sidebar.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
-        mu = st.sidebar.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-
+        st.sidebar.subheader("Fractional Parameters")
+        lam = st.sidebar.slider("Lambda (λ)", 0.1, 2.0, lambda_default, step=0.01)
+        mu = st.sidebar.slider("Mu (μ)", 0.1, 2.0, mu_default, step=0.01)
 elif mode == "Hysteresis":
-    T_set = st.sidebar.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
-    dT1 = st.sidebar.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
-    dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
-
-duration = st.sidebar.slider("Simulation duration [s]", 50, 500, 300, 10)
-
-start_button = st.sidebar.button("Start")
-stop_placeholder = st.sidebar.empty()  # se actualizará con Stop
-time_elapsed_placeholder = st.sidebar.empty()
-
-# Firma abajo
-st.sidebar.markdown(
-    "<span style='font-size:10px'>Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control.</span>",
-    unsafe_allow_html=True
-)
+    st.sidebar.subheader("ON/OFF Control")
+    T_set = st.sidebar.slider("Setpoint [°C]", 5.0, 20.0, 12.0, step=0.1)
+    dT1 = st.sidebar.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, step=0.1)
+    dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, step=0.1)
 
 # -------------------------------
-# Main title
+# Start/Stop button
 # -------------------------------
-st.title("❄️ PeltierLab Interactive Simulator")
-st.markdown("Interactive simulation of thermoelectric systems using PID, FOPID, and Hysteresis control.")
+if "running" not in st.session_state:
+    st.session_state.running = False
+if "start_time" not in st.session_state:
+    st.session_state.start_time = None
+
+start_stop_col = st.sidebar.container()
+start_button = start_stop_col.button("Start" if not st.session_state.running else "Stop")
+time_placeholder = start_stop_col.empty()
+
+if start_button:
+    st.session_state.running = not st.session_state.running
+    if st.session_state.running:
+        st.session_state.start_time = time.time()
+    else:
+        st.session_state.start_time = None
 
 # -------------------------------
-# Figure setup
-# -------------------------------
-fig, ax = plt.subplots(figsize=(8, 4))
-ax.set_xlim(0, duration)
-ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=8)
-ax.set_ylabel("Temperature [°C]", fontsize=8)
-ax.set_title(f"{mode} Control Simulation", fontsize=10)
-ax.grid(True)
-ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
-line_temp, = ax.plot([], [], color='blue', linewidth=1)
-line_pwm, = ax.plot([], [], color='green', linewidth=1)
-st.pyplot(fig, clear_figure=True)
-
-# -------------------------------
-# Simulation setup
+# Simulation initialization
 # -------------------------------
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
-else:
+elif mode == "Hysteresis":
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
 
-y_vals, pwm_vals, t_vals = [], [], []
-t_current = 0.0
-dt = 0.25  # 4 FPS
-running = False
-
-# -------------------------------
-# Metrics and recommendations placeholder
-# -------------------------------
+# Placeholders
+sim_placeholder = st.empty()
 metrics_placeholder = st.empty()
-recommend_placeholder = st.empty()
+reco_placeholder = st.empty()
 
 # -------------------------------
-# Run simulation loop
+# Figure with 2/3 Temp + 1/3 PWM
 # -------------------------------
-while True:
-    if start_button:
-        running = True
-        start_button = False  # no reinicia cada loop
-    if not running:
-        time.sleep(0.1)
-        continue
+fig = plt.figure(figsize=(6,4))
+gs = GridSpec(3,1, figure=fig)
+ax_temp = fig.add_subplot(gs[:2,0])
+ax_pwm = fig.add_subplot(gs[2,0])
 
-    # Stop button
-    if stop_placeholder.button("Stop"):
-        running = False
-        continue
+# Temperature plot
+ax_temp.set_xlim(0, duration)
+ax_temp.set_ylim(5, 20)
+ax_temp.set_xlabel("Time [s]", fontsize=8)
+ax_temp.set_ylabel("Temp [°C]", fontsize=8)
+ax_temp.tick_params(axis='both', labelsize=7)
+ax_temp.grid(True, linestyle='--', alpha=0.5)
+ax_temp.axhline(T_set, color="red", linestyle="--", label="Setpoint")
+line_temp, = ax_temp.plot([], [], color="blue", linewidth=1.2, label="Temperature")
+ax_temp.legend(fontsize=7)
 
-    # Step simulation
-    if mode in ["PID", "FOPID"]:
-        Tc, pwm = sim.step(T_set, Kp, Ki, Kd,
-                           lam if mode=="FOPID" else lambda_default,
-                           mu if mode=="FOPID" else mu_default,
-                           bias, dt)
+# PWM plot
+ax_pwm.set_xlim(0, duration)
+ax_pwm.set_ylim(0, 255)
+ax_pwm.set_xlabel("Time [s]", fontsize=7)
+ax_pwm.set_ylabel("PWM", fontsize=7)
+ax_pwm.tick_params(axis='both', labelsize=6)
+ax_pwm.grid(True, linestyle='--', alpha=0.3)
+line_pwm, = ax_pwm.plot([], [], color="green", linewidth=1.2, label="PWM")
+
+sim_placeholder.pyplot(fig)
+
+# -------------------------------
+# Real-time simulation loop
+# -------------------------------
+t_vals, y_vals, pwm_vals = [], [], []
+
+fps = 4
+dt = 1/fps
+total_steps = int(duration/dt)
+
+for step in range(total_steps):
+    if not st.session_state.running:
+        break
+
+    t_current = step*dt
+
+    # Compute temp & pwm
+    if mode == "PID":
+        Tc, pwm = sim.simulate_3nodes_FOPID(np.array([0,t_current]), T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+                                            bias=bias, lam=lambda_default, mu=mu_default)
+        y_new = Tc[-1]
+        pwm_new = pwm[-1]
+    elif mode == "FOPID":
+        Tc, pwm = sim.simulate_3nodes_FOPID(np.array([0,t_current]), T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+                                            bias=bias, lam=lam, mu=mu)
+        y_new = Tc[-1]
+        pwm_new = pwm[-1]
     else:
-        Tc, pwm = sim.step(T_set, dT1, dT2, dt)
+        Tc, Tm, Th, pwm = sim.simulate(np.array([0,t_current]), T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0)
+        y_new = Tc[-1]
+        pwm_new = pwm[-1]
 
-    t_current += dt
-    y_vals.append(Tc)
-    pwm_vals.append(pwm)
     t_vals.append(t_current)
+    y_vals.append(y_new)
+    pwm_vals.append(pwm_new)
 
-    # Update plot
+    # Update plots
     line_temp.set_data(t_vals, y_vals)
     line_pwm.set_data(t_vals, pwm_vals)
-    ax.set_xlim(0, max(duration, t_current))
-    st.pyplot(fig, clear_figure=True)
+    sim_placeholder.pyplot(fig)
 
     # Update metrics
-    error = np.array(y_vals) - T_set
-    ss_error = np.mean(error[-int(1/dt):])
+    error = np.array(y_vals)-T_set
+    ss_error = np.mean(error[-min(len(error), int(fps*10)):])
     rmse = np.sqrt(np.mean(error**2))
     settling_time = next((t_vals[i] for i in range(len(y_vals)) if np.all(np.abs(error[i:]) <= 0.5)), None)
+    metrics_placeholder.markdown(
+        f"**Metrics (real-time):**\n- Settling time: {settling_time if settling_time else 'Not reached'} s\n"
+        f"- Steady-state error: {ss_error:.2f} °C\n- RMSE: {rmse:.2f} °C"
+    )
 
-    metrics_placeholder.markdown(f"""
-    **Metrics**  
-    Settling time: {settling_time:.2f} s  
-    Steady-state error: {ss_error:.3f} °C  
-    RMSE: {rmse:.3f}  
-    """)
-    
-    # Recommendations
-    rec_text = ""
-    if Kp > Kp_default: rec_text += "➡️ Kp demasiado alto → overshoot mayor\n"
-    elif Kp < Kp_default: rec_text += "➡️ Kp demasiado bajo → respuesta lenta\n"
-    if mode=="FOPID":
-        if lam > lambda_default: rec_text += "➡️ Lambda mayor → más precisión\n"
-        if mu > mu_default: rec_text += "➡️ Mu mayor → respuesta más agresiva\n"
-    recommend_placeholder.markdown(rec_text)
+    # Update recommendations
+    reco_text = ""
+    if mode in ["PID","FOPID"]:
+        if Kp>100: reco_text+="- Kp alto → overshoot, reducir Kp\n"
+        if Kp<20: reco_text+="- Kp bajo → respuesta lenta, aumentar Kp\n"
+        if mode=="FOPID":
+            if lam>1.2: reco_text+="- λ alto → más precisión\n"
+            if mu<0.5: reco_text+="- μ bajo → respuesta más lenta\n"
+    reco_placeholder.markdown("**Recommendations:**\n"+reco_text)
 
     # Update elapsed time
-    time_elapsed_placeholder.markdown(f"Time elapsed: {t_current:.1f} s")
-
-    if t_current >= duration:
-        running = False
-        break
+    if st.session_state.start_time:
+        elapsed = time.time()-st.session_state.start_time
+        time_placeholder.markdown(f"Time elapsed: {int(elapsed)} s")
 
     time.sleep(dt)
