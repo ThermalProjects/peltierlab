@@ -99,7 +99,7 @@ elif mode == "Hysteresis":
 # -------------------------------
 st.subheader(f"Results: {mode}")
 fig, ax = plt.subplots(figsize=(7, 3.5))
-line, = ax.plot([], [], lw=1.5, color='blue')
+line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 ax.set_xlim(0, duration)
 ax.set_ylim(0, 20)
