@@ -1,4 +1,4 @@
-# app_real_time_optimized.py
+# app_real_time_with_placeholder.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,7 +31,9 @@ mu_default = 1.47
 # Title
 # -------------------------------
 st.title("❄️ PeltierLab Real-Time Simulator")
-st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies in real-time.")
+st.markdown(
+    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies in real-time."
+)
 
 # -------------------------------
 # Sidebar controls
@@ -60,27 +62,38 @@ elif mode == "Hysteresis":
     dT1 = st.sidebar.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
     dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
-# -------------------------------
-# Start button
-# -------------------------------
 start_sim = st.sidebar.button("Start Simulation")
 
-# Placeholder for real-time plot
+# -------------------------------
+# Placeholder for plot
+# -------------------------------
 plot_placeholder = st.empty()
 
-if start_sim:
-    st.subheader(f"Results: {mode} (Real-Time)")
+# Draw static plot first (axes, grid, setpoint)
+fig_static, ax_static = plt.subplots(figsize=(8, 4))
+ax_static.set_xlim(0, duration)
+ax_static.set_ylim(T_start - 5, T_set + 5)
+ax_static.set_xlabel("Time [s]")
+ax_static.set_ylabel("Temperature [°C]")
+ax_static.set_title(f"{mode} Control Simulation")
+ax_static.axhline(T_set, color="red", linestyle="--", label="Setpoint")
+ax_static.grid(True)
+ax_static.legend(fontsize=9)
+plot_placeholder.pyplot(fig_static)
 
-    # Initialize simulator
+# -------------------------------
+# Run simulation if Start pressed
+# -------------------------------
+if start_sim:
     if mode in ["PID", "FOPID"]:
         sim = Simulator(best_params, T_start=T_start)
     else:
         sim = SimulatorHysteresisReal(best_params, T_start=T_start)
 
-    # Initialize plot
+    # Prepare live plot
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.set_xlim(0, duration)
-    ax.set_ylim(T_start-5, T_set+5)
+    ax.set_ylim(T_start - 5, T_set + 5)
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Temperature [°C]")
     ax.set_title(f"{mode} Control Simulation")
@@ -92,9 +105,6 @@ if start_sim:
     temps = []
     times = []
 
-    # -------------------------------
-    # Real-time simulation loop
-    # -------------------------------
     for t in range(duration):
         times.append(t)
         if mode in ["PID", "FOPID"]:
@@ -105,8 +115,8 @@ if start_sim:
                 Ki=Ki,
                 Kd=Kd,
                 bias=bias,
-                lam=lam if mode=="FOPID" else lambda_default,
-                mu=mu if mode=="FOPID" else mu_default
+                lam=lam if mode == "FOPID" else lambda_default,
+                mu=mu if mode == "FOPID" else mu_default
             )
             temps.append(Tc_sim[-1])
         else:
@@ -121,19 +131,23 @@ if start_sim:
 
         line.set_data(times, temps)
         plot_placeholder.pyplot(fig)
-        time.sleep(1)  # Actual "1 second per step"
+        time.sleep(1)
 
     # -------------------------------
     # Metrics
     # -------------------------------
     temps_array = np.array(temps)
     error = temps_array - T_set
-    settling_time = next((times[i] for i in range(len(temps_array)) if np.all(np.abs(temps_array[i:] - T_set) <= 0.5)), None)
+    settling_time = next(
+        (times[i] for i in range(len(temps_array)) if np.all(np.abs(temps_array[i:] - T_set) <= 0.5)), None
+    )
     ss_error = np.mean(error[-50:])
     rmse = np.sqrt(np.mean(error**2))
 
     with st.expander("Model Information & Metrics", expanded=True):
         st.markdown("### Metrics")
-        st.write(f"Settling time: {settling_time:.2f} s" if settling_time else "Settling time: Not reached")
+        st.write(
+            f"Settling time: {settling_time:.2f} s" if settling_time else "Settling time: Not reached"
+        )
         st.write(f"Steady-state error: {ss_error:.3f} °C")
         st.write(f"RMSE: {rmse:.3f}")
