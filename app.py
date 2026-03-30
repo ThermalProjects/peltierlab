@@ -1,9 +1,8 @@
-# app_real_time_fine.py
+# app.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-
 from peltierlab.core.simulator import Simulator
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 
@@ -25,139 +24,133 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Session state
-# -------------------------------
-if "running" not in st.session_state:
-    st.session_state.running = False
-if "t_index" not in st.session_state:
-    st.session_state.t_index = 0
-
-# -------------------------------
 # Title
 # -------------------------------
-st.title("❄️ PeltierLab Real-Time Simulator")
-st.markdown("Simulate thermoelectric control with PID, FOPID, and Hysteresis in real-time (1:1).")
+st.title("❄️ PeltierLab Interactive Simulator")
+st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
 
 # -------------------------------
 # Sidebar (compact)
 # -------------------------------
-with st.sidebar:
-    st.header("Settings")
-    mode = st.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-    duration = st.slider("Duration [s]", 50, 500, 300, step=10, format="%d s")
+st.sidebar.header("Settings")
+st.sidebar.markdown("<style>div.row-widget.stSlider{margin-bottom: 0.5rem;}</style>", unsafe_allow_html=True)
 
-    # Control params (compact)
-    st.subheader("Control Params")
-    T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
-    if mode in ["PID", "FOPID"]:
-        bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-        Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
-        Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
-        Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-        if mode == "FOPID":
-            st.subheader("Fractional Params")
-            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
-            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-    else:
-        dT1 = st.slider("Upper band dT1 [°C]", 0.1, 1.0, 0.5, 0.1)
-        dT2 = st.slider("Lower band dT2 [°C]", 0.1, 1.0, 0.5, 0.1)
+mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+duration = st.sidebar.slider("Simulation duration [s]", 50, 500, 300, 10)
 
-    # Start/Stop button
-    def toggle_run():
-        st.session_state.running = not st.session_state.running
-        if not st.session_state.running:
-            st.session_state.t_index = 0
-
-    st.button("Start/Stop", on_click=toggle_run)
-    time_placeholder = st.empty()
+if mode in ["PID", "FOPID"]:
+    st.sidebar.subheader("Control Parameters")
+    T_set = st.sidebar.slider("Setpoint [°C]", 0.0, 20.0, 12.0, 0.1)
+    bias = st.sidebar.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
+    Kp = st.sidebar.slider("Kp", 0, 200, int(Kp_default), 1)
+    Ki = st.sidebar.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
+    Kd = st.sidebar.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+    if mode == "FOPID":
+        st.sidebar.subheader("Fractional Parameters")
+        lam = st.sidebar.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
+        mu = st.sidebar.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
+else:
+    st.sidebar.subheader("ON/OFF Control")
+    T_set = st.sidebar.slider("Setpoint [°C]", 0.0, 20.0, 12.0, 0.1)
+    dT1 = st.sidebar.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
+    dT2 = st.sidebar.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Prepare simulation
+# Start/Stop button & elapsed time
 # -------------------------------
-t_sim = np.arange(0, duration + 0.5, 0.5)  # medio segundo pasos
+if 'running' not in st.session_state:
+    st.session_state.running = False
+    st.session_state.time_elapsed = 0
+
+col1, col2 = st.columns([1,1])
+with col1:
+    start_stop_btn = st.button("Start" if not st.session_state.running else "Stop")
+with col2:
+    time_text = st.empty()
+
+if start_stop_btn:
+    st.session_state.running = not st.session_state.running
+    if not st.session_state.running:
+        st.session_state.time_elapsed = 0
+
+# -------------------------------
+# Simulation (precompute)
+# -------------------------------
+t_new = np.linspace(0, duration, duration*4 + 1)  # 4 fps
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
-    Tc_full, _ = sim.simulate_3nodes_FOPID(
-        t_custom=t_sim,
-        T_set=T_set,
-        Kp=Kp,
-        Ki=Ki,
-        Kd=Kd,
-        bias=bias,
-        lam=lam if mode=="FOPID" else lambda_default,
-        mu=mu if mode=="FOPID" else mu_default
+    Tc_sim, _ = sim.simulate_3nodes_FOPID(
+        t_custom=t_new, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+        bias=bias, lam=lambda_default if mode=="PID" else lam,
+        mu=mu_default if mode=="PID" else mu
     )
+    y_sim = Tc_sim
 else:
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-    Tc_full, _, _, _ = sim.simulate(
-        t_custom=t_sim,
-        T_set=T_set,
-        dT1=dT1,
-        dT2=dT2,
-        P_max=5.0
+    Tc, _, _, _ = sim.simulate(
+        t_custom=t_new, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
     )
+    y_sim = Tc
 
 # -------------------------------
-# Placeholder plot
+# Placeholder for matplotlib figure
 # -------------------------------
-plot_placeholder = st.empty()
-fig, ax = plt.subplots(figsize=(6,3))  # más compacto
+fig_placeholder = st.empty()
+fig, ax = plt.subplots(figsize=(8,4))
 ax.set_xlim(0, duration)
 ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=8)
-ax.set_ylabel("Temperature [°C]", fontsize=8)
-ax.set_title(f"{mode} Control Simulation", fontsize=10)
-ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
-ax.grid(True)
-line, = ax.plot([], [], color="blue", linewidth=1.5, label="Temperature")
+ax.set_xlabel("Time [s]", fontsize=10)
+ax.set_ylabel("Temperature [°C]", fontsize=10)
+ax.tick_params(axis='both', labelsize=8)
+ax.grid(True, linestyle='--', alpha=0.5)
+line, = ax.plot([], [], color='blue', linewidth=1.5, label="Temperature")
+ax.axhline(T_set, color="red", linestyle="--", linewidth=1, label="Setpoint")
 ax.legend(fontsize=8)
-plot_placeholder.pyplot(fig)
+fig_placeholder.pyplot(fig)
 
 # -------------------------------
-# Real-time loop
+# Real-time simulation loop
 # -------------------------------
+x_data, y_data = [], []
+
 if st.session_state.running:
-    temps = []
-    for i in range(st.session_state.t_index, len(t_sim)):
+    for i in range(len(t_new)):
         if not st.session_state.running:
             break
-        temps.append(Tc_full[i])
-        line.set_data(t_sim[:i+1], Tc_full[:i+1])
-        plot_placeholder.pyplot(fig)
-
-        # Update elapsed time
-        time_placeholder.markdown(f"**Time elapsed:** {t_sim[i]:.1f} s / {duration} s")
-
-        st.session_state.t_index = i + 1
-        time.sleep(0.5)
+        x_data.append(t_new[i])
+        y_data.append(y_sim[i])
+        line.set_data(x_data, y_data)
+        ax.set_xlim(0, max(duration, t_new[i]+1))
+        fig_placeholder.pyplot(fig)
+        st.session_state.time_elapsed = t_new[i]
+        time_text.text(f"Time elapsed: {t_new[i]:.1f} s")
+        time.sleep(0.25)  # 4 frames per second
 
 # -------------------------------
-# Metrics y recomendaciones
+# Metrics & Recommendations
 # -------------------------------
-error = Tc_full[:st.session_state.t_index] - T_set
-if len(error) > 0:
-    ss_error = np.mean(error[-50:]) if len(error) >= 50 else np.mean(error)
-    rmse = np.sqrt(np.mean(error**2))
-    settling_time = next((t_sim[i] for i in range(len(error)) if np.all(np.abs(error[i:]) <= 0.5)), None)
-else:
-    ss_error = rmse = settling_time = None
-
-with st.expander("Metrics & Recommendations", expanded=True):
+with st.expander("Model Information & Metrics", expanded=True):
+    st.markdown("### Simulation Details")
     st.write(f"Control mode: {mode}")
     st.write(f"Setpoint: {T_set:.2f} °C")
+
+    if y_data:
+        error = np.array(y_data) - T_set
+        ss_error = np.mean(error[-50:]) if len(error) >= 50 else None
+        rmse = np.sqrt(np.mean(error**2)) if len(error) > 0 else None
+        settling_time = next((x_data[i] for i in range(len(error)) if np.all(np.abs(error[i:]) <= 0.5)), None)
+    else:
+        ss_error = rmse = settling_time = None
+
+    st.markdown("### Metrics")
     st.write(f"Settling time: {settling_time:.2f} s" if settling_time else "Settling time: Not reached")
     st.write(f"Steady-state error: {ss_error:.3f} °C" if ss_error is not None else "Steady-state error: N/A")
     st.write(f"RMSE: {rmse:.3f}" if rmse is not None else "RMSE: N/A")
 
-    # Recomendaciones automáticas
-    st.markdown("### Recommendations:")
-    if settling_time is None:
-        st.info("Slow settling → increase Kp or reduce Ki for faster response.")
-    elif settling_time > duration/2:
-        st.info("Response is slow → consider increasing Kp or adjusting Ki/Kd.")
-    if abs(ss_error) > 0.5:
-        st.warning("High steady-state error → consider tuning Ki (or λ for FOPID).")
-    if max(error) > 1.0:
-        st.warning("Overshoot detected → consider reducing Kp or μ (FOPID).")
-    if rmse < 1:
+    st.markdown("### Quick Recommendations")
+    if ss_error is not None and abs(ss_error) > 0.5:
+        st.warning("High steady-state error → consider adjusting Ki (or λ for FOPID).")
+    if settling_time is not None and settling_time > duration/2:
+        st.info("Slow settling time → consider increasing Kp or adjusting Ki/Kd.")
+    if rmse is not None and rmse < 1:
         st.success("Overall accuracy is good (low RMSE).")
