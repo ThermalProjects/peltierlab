@@ -1,4 +1,4 @@
-# app_real_time_light.py
+# app_real_time_1to1.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -36,7 +36,7 @@ if "t_index" not in st.session_state:
 # Title
 # -------------------------------
 st.title("❄️ PeltierLab Real-Time Simulator")
-st.markdown("Simulate thermoelectric control with PID, FOPID, and Hysteresis in real-time.")
+st.markdown("Simulate thermoelectric control with PID, FOPID, and Hysteresis in real-time (1:1).")
 
 # -------------------------------
 # Sidebar
@@ -74,7 +74,7 @@ st.sidebar.button("Start/Stop Simulation", on_click=toggle_run)
 # -------------------------------
 # Prepare simulation
 # -------------------------------
-t_sim = np.arange(0, duration + 1)
+t_sim = np.arange(0, duration + 1)  # step = 1s
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
     Tc_full, _ = sim.simulate_3nodes_FOPID(
@@ -105,7 +105,7 @@ time_display = st.empty()
 
 fig, ax = plt.subplots(figsize=(8,4))
 ax.set_xlim(0, duration)
-ax.set_ylim(T_start - 5, T_set + 5)
+ax.set_ylim(0, 20)  # rango fijo
 ax.set_xlabel("Time [s]")
 ax.set_ylabel("Temperature [°C]")
 ax.set_title(f"{mode} Control Simulation")
@@ -116,7 +116,7 @@ ax.legend(fontsize=9)
 plot_placeholder.pyplot(fig)
 
 # -------------------------------
-# Real-time loop
+# Real-time loop (1:1)
 # -------------------------------
 if st.session_state.running:
     temps = []
@@ -128,4 +128,4 @@ if st.session_state.running:
         plot_placeholder.pyplot(fig)
         time_display.markdown(f"**Time elapsed:** {i} s / {duration} s")
         st.session_state.t_index = i + 1
-        time.sleep(0.1)  # ligero y suave
+        time.sleep(1)  # <-- 1 segundo = 1 segundo real
