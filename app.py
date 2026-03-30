@@ -1,4 +1,4 @@
-# app_real_time_compact.py
+# app_real_time_fine.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,11 +44,12 @@ st.markdown("Simulate thermoelectric control with PID, FOPID, and Hysteresis in 
 with st.sidebar:
     st.header("Settings")
     mode = st.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-    duration = st.slider("Duration [s]", 50, 500, 300, step=10)
+    duration = st.slider("Duration [s]", 50, 500, 300, step=10, format="%d s")
 
+    # Control params (compact)
+    st.subheader("Control Params")
+    T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
     if mode in ["PID", "FOPID"]:
-        st.subheader("Control Params")
-        T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
         bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
@@ -58,8 +59,6 @@ with st.sidebar:
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
     else:
-        st.subheader("Hysteresis Control")
-        T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band dT1 [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band dT2 [°C]", 0.1, 1.0, 0.5, 0.1)
 
@@ -70,13 +69,12 @@ with st.sidebar:
             st.session_state.t_index = 0
 
     st.button("Start/Stop", on_click=toggle_run)
-    st.markdown("**Time elapsed:**")
     time_placeholder = st.empty()
 
 # -------------------------------
 # Prepare simulation
 # -------------------------------
-t_sim = np.arange(0, duration + 1)
+t_sim = np.arange(0, duration + 0.5, 0.5)  # medio segundo pasos
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
     Tc_full, _ = sim.simulate_3nodes_FOPID(
@@ -103,17 +101,16 @@ else:
 # Placeholder plot
 # -------------------------------
 plot_placeholder = st.empty()
-
-fig, ax = plt.subplots(figsize=(7,3))  # más compacto
+fig, ax = plt.subplots(figsize=(6,3))  # más compacto
 ax.set_xlim(0, duration)
 ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=10)
-ax.set_ylabel("Temperature [°C]", fontsize=10)
-ax.set_title(f"{mode} Control Simulation", fontsize=12)
+ax.set_xlabel("Time [s]", fontsize=8)
+ax.set_ylabel("Temperature [°C]", fontsize=8)
+ax.set_title(f"{mode} Control Simulation", fontsize=10)
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 ax.grid(True)
-line, = ax.plot([], [], color="blue", linewidth=2, label="Temperature")
-ax.legend(fontsize=9)
+line, = ax.plot([], [], color="blue", linewidth=1.5, label="Temperature")
+ax.legend(fontsize=8)
 plot_placeholder.pyplot(fig)
 
 # -------------------------------
@@ -128,14 +125,14 @@ if st.session_state.running:
         line.set_data(t_sim[:i+1], Tc_full[:i+1])
         plot_placeholder.pyplot(fig)
 
-        # Update time below button
-        time_placeholder.markdown(f"**Time elapsed:** {i} s / {duration} s")
+        # Update elapsed time
+        time_placeholder.markdown(f"**Time elapsed:** {t_sim[i]:.1f} s / {duration} s")
 
         st.session_state.t_index = i + 1
-        time.sleep(1)
+        time.sleep(0.5)
 
 # -------------------------------
-# Metrics debajo de la gráfica
+# Metrics y recomendaciones
 # -------------------------------
 error = Tc_full[:st.session_state.t_index] - T_set
 if len(error) > 0:
@@ -145,9 +142,22 @@ if len(error) > 0:
 else:
     ss_error = rmse = settling_time = None
 
-with st.expander("Metrics & Quick Analysis", expanded=True):
+with st.expander("Metrics & Recommendations", expanded=True):
     st.write(f"Control mode: {mode}")
     st.write(f"Setpoint: {T_set:.2f} °C")
     st.write(f"Settling time: {settling_time:.2f} s" if settling_time else "Settling time: Not reached")
     st.write(f"Steady-state error: {ss_error:.3f} °C" if ss_error is not None else "Steady-state error: N/A")
     st.write(f"RMSE: {rmse:.3f}" if rmse is not None else "RMSE: N/A")
+
+    # Recomendaciones automáticas
+    st.markdown("### Recommendations:")
+    if settling_time is None:
+        st.info("Slow settling → increase Kp or reduce Ki for faster response.")
+    elif settling_time > duration/2:
+        st.info("Response is slow → consider increasing Kp or adjusting Ki/Kd.")
+    if abs(ss_error) > 0.5:
+        st.warning("High steady-state error → consider tuning Ki (or λ for FOPID).")
+    if max(error) > 1.0:
+        st.warning("Overshoot detected → consider reducing Kp or μ (FOPID).")
+    if rmse < 1:
+        st.success("Overall accuracy is good (low RMSE).")
