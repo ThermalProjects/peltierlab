@@ -28,38 +28,6 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Sidebar controls
-# -------------------------------
-st.sidebar.header("Simulation Settings")
-
-# Ambient temperature
-T_start = st.sidebar.slider("Ambient temperature [°C]", 15.0, 25.0, 19.0, 0.1)
-
-# Control mode
-mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-
-# Simulation duration
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-
-# -------------------------------
-# Controller parameters
-# -------------------------------
-with st.sidebar.expander("Controller Parameters", expanded=True):
-    if mode in ["PID", "FOPID"]:
-        T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
-        bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-        Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
-        Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
-        Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-        if mode == "FOPID":
-            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
-            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-    elif mode == "Hysteresis":
-        T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
-        dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
-        dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
-
-# -------------------------------
 # Session state initialization
 # -------------------------------
 if 'sim_state' not in st.session_state:
@@ -74,11 +42,11 @@ if 'sim_state' not in st.session_state:
 sim_state = st.session_state['sim_state']
 
 # -------------------------------
-# Buttons in a single row
+# Top controls: Start / Pause / Stop
 # -------------------------------
-cols = st.sidebar.columns(3)
+cols = st.columns(3)
 start_btn = cols[0].button("Start")
-pause_btn = cols[1].button("Pause/Resume")
+pause_btn = cols[1].button("Pause")
 stop_btn = cols[2].button("Stop")
 
 # Button actions
@@ -91,7 +59,8 @@ if start_btn:
     sim_state['pwm_data'] = []
 
 if pause_btn:
-    sim_state['paused'] = not sim_state['paused']  # toggle pause
+    if sim_state['running']:
+        sim_state['paused'] = True  # freeze simulation
 
 if stop_btn:
     sim_state['running'] = False
@@ -100,6 +69,36 @@ if stop_btn:
     sim_state['t_data'] = []
     sim_state['y_data'] = []
     sim_state['pwm_data'] = []
+
+# -------------------------------
+# Sidebar controls
+# -------------------------------
+st.sidebar.header("Simulation Settings")
+
+# Ambient temperature
+T_start = st.sidebar.slider("Ambient temperature [°C]", 15.0, 25.0, 19.0, 0.1)
+
+# Control mode
+mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+
+# Simulation duration
+duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+
+# Controller parameters
+with st.sidebar.expander("Controller Parameters", expanded=True):
+    if mode in ["PID", "FOPID"]:
+        T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
+        bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
+        Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
+        Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
+        Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+        if mode == "FOPID":
+            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
+            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
+    elif mode == "Hysteresis":
+        T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
+        dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
+        dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
 # Prepare simulation
@@ -143,13 +142,11 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics & recommendations
+# Metrics & Reference PSO inside expander
 # -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
 with info_expander:
     metrics_text = st.empty()
-
-    # Reference optimal display inside metrics
     if mode == "PID":
         metrics_text.markdown("**Reference optimal PID (PSO):**")
         metrics_text.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}")
@@ -168,6 +165,11 @@ if sim_state['running']:
     fps = 4
     interval = 1.0 / fps
     start_time = time.time()
+
+    # placeholders for compact display
+    elapsed_placeholder = st.sidebar.empty()
+    pwm_placeholder = st.sidebar.empty()
+    pwm_bar = st.sidebar.empty()
 
     for i in range(sim_state['index'], len(t_full)):
         if not sim_state['running']:
@@ -194,9 +196,6 @@ if sim_state['running']:
         plot_placeholder.pyplot(fig)
 
         # update sidebar info (compact)
-        elapsed_placeholder = st.sidebar.empty()
-        pwm_placeholder = st.sidebar.empty()
-        pwm_bar = st.sidebar.empty()
         elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
