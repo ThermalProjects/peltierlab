@@ -175,12 +175,6 @@ if static:
         + ("\n".join(f"- {r}" for r in recs))
     )
 
-    # --- PSO suggestion ---
-    if mode == "PID":
-        metrics_text.markdown(metrics_text._text + f"\n\n**PSO suggested parameters:** Kp={Kp_default}, Ki={Ki_default}, Kd={Kd_default}")
-    elif mode == "FOPID":
-        metrics_text.markdown(metrics_text._text + f"\n\n**PSO suggested parameters:** Kp={Kp_default}, Ki={Ki_default}, Kd={Kd_default}, Lambda={lambda_default}, Mu={mu_default}")
-
 # DYNAMIC MODE: step-by-step with Start/Stop
 elif dynamic and st.session_state['running_state']:
     fps = 4
@@ -225,9 +219,3 @@ elif dynamic and st.session_state['running_state']:
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
             + ("\n".join(f"\n- {r}" for r in recs))
         )
-
-        # --- PSO suggestion ---
-        if mode == "PID":
-            metrics_text.markdown(metrics_text._text + f"\n\n**PSO suggested parameters:** Kp={Kp_default}, Ki={Ki_default}, Kd={Kd_default}")
-        elif mode == "FOPID":
-            metrics_text.markdown(metrics_text._text + f"\n\n**PSO suggested parameters:** Kp={Kp_default}, Ki={Ki_default}, Kd={Kd_default}, Lambda={lambda_default}, Mu={mu_default}")
