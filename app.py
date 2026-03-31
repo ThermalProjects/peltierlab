@@ -42,26 +42,17 @@ st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
-# -------------------------------
-# Static / Dynamic toggle (mutually exclusive)
-# -------------------------------
-mode_run = st.sidebar.selectbox("Simulation Mode", ["Static", "Dynamic"], index=1)
+# Simulation duration slider
+duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-# En Dynamic, habilitamos el start/stop; en Static, se desactiva
-if mode_run == "Static":
-    st.session_state['running_state'] = False
-    start_stop_disabled = True
-else:
-    start_stop_disabled = False
+# Static / Dynamic buttons (mutually exclusive)
+static = st.sidebar.checkbox("Static", value=False)
+dynamic = st.sidebar.checkbox("Dynamic", value=False)
+if static and dynamic:
+    st.sidebar.warning("Static and Dynamic are mutually exclusive. Only one can be active.")
+    dynamic = False
 
-# Simulation duration and start/stop
-if start_stop_disabled:
-    st.sidebar.button("Start/Stop (Disabled in Static Mode)", disabled=True)
-else:
-    if st.sidebar.button("Start/Stop"):
-        if 'running_state' not in st.session_state:
-            st.session_state['running_state'] = False
-        st.session_state['running_state'] = not st.session_state['running_state']
+start_stop = st.sidebar.button("Start/Stop")
 
 # Elapsed time placeholder
 elapsed_placeholder = st.sidebar.empty()
@@ -138,9 +129,12 @@ with info_expander:
 # Simulation loop (4 FPS)
 # -------------------------------
 running = False
+if start_stop:
+    running = not running
+
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
-st.session_state['running_state'] = st.session_state.get('running_state', False)
+st.session_state['running_state'] = running
 
 if st.session_state['running_state']:
     y_data = []
@@ -155,6 +149,7 @@ if st.session_state['running_state']:
         if elapsed_real < t_full[i]:
             time.sleep(t_full[i] - elapsed_real)
 
+        # Update data
         y_data.append(Tc_full[i])
         t_data.append(t_full[i])
 
