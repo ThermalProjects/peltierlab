@@ -51,6 +51,11 @@ static = control_type == "Static"
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 start_stop = st.sidebar.button("Start/Stop") if dynamic else False
 
+# -------------------------------
+# Ambient temperature slider
+# -------------------------------
+T_amb = st.sidebar.slider("Ambient Temperature [°C]", 10.0, 35.0, 25.0, 0.1)
+
 # Placeholders
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
@@ -92,7 +97,7 @@ if mode in ["PID", "FOPID"]:
             bias=bias, lam=lam, mu=mu
         )
 elif mode == "Hysteresis":
-    sim = SimulatorHysteresisReal(best_params, T_start=T_start)
+    sim = SimulatorHysteresisReal(best_params, T_start=T_start, T_amb=T_amb)
     t_full = np.linspace(0, duration, duration + 1)
     Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
         t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
