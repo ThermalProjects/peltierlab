@@ -142,8 +142,7 @@ metrics_placeholder = metrics_expander.empty()
 # -------------------------------
 # Simulation update
 # -------------------------------
-if st.session_state.dynamic_mode:
-    # Dynamic: advance frame by frame
+def update_dynamic():
     if st.session_state.running and st.session_state.idx < len(t_full)-1:
         st.session_state.idx += 1
 
@@ -179,6 +178,10 @@ if st.session_state.dynamic_mode:
         f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
         + ("\n".join(f"- {r}" for r in recs))
     )
+
+if st.session_state.dynamic_mode:
+    update_dynamic()
+    st.experimental_rerun()  # auto-refresh while running
 
 # -------------------------------
 # Static mode: full simulation
