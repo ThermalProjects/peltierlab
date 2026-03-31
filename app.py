@@ -42,33 +42,19 @@ st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
-# Simulation duration
+# Static / Dynamic (mutually exclusive)
+control_type = st.sidebar.radio("Simulation type", ["Dynamic", "Static"])
+dynamic = control_type == "Dynamic"
+static = control_type == "Static"
+
+# Simulation duration (only relevant for Dynamic)
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+start_stop = st.sidebar.button("Start/Stop") if dynamic else False
 
-# -------------------------------
-# Simulation buttons (Dynamic / Static)
-# -------------------------------
-dynamic = st.sidebar.checkbox("Dynamic", value=True)
-static  = st.sidebar.checkbox("Static", value=False)
-
-if dynamic and static:
-    st.sidebar.warning("Dynamic and Static are mutually exclusive. Only one will be active.")
-    static = False
-
-# -------------------------------
-# Start / Stop buttons
-# -------------------------------
-col1, col2 = st.sidebar.columns(2)
-start = col1.button("Start")
-stop  = col2.button("Stop")
-
-if 'running_state' not in st.session_state:
-    st.session_state['running_state'] = False
-
-if start:
-    st.session_state['running_state'] = True
-if stop:
-    st.session_state['running_state'] = False
+# Placeholders
+elapsed_placeholder = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
 
 # -------------------------------
 # Compact sliders
@@ -80,11 +66,9 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
         Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-
     elif mode == "Hysteresis":
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
@@ -117,7 +101,7 @@ elif mode == "Hysteresis":
 # -------------------------------
 # Plot placeholders
 # -------------------------------
-st.subheader(f"Results: {mode}")
+st.subheader(f"Results: {mode} ({control_type})")
 fig, ax = plt.subplots(figsize=(7, 3.5))
 line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
@@ -138,22 +122,69 @@ with info_expander:
     metrics_text = st.empty()
 
 # -------------------------------
-# Simulation loop (4 FPS)
+# Simulation logic
 # -------------------------------
-if dynamic:
+y_data = []
+t_data = []
+
+# STATIC MODE: show full simulation immediately
+if static:
+    t_data = t_full
+    y_data = Tc_full
+
+    # Update line
+    line.set_data(t_data, y_data)
+    ax.set_xlim(0, duration)
+    plot_placeholder.pyplot(fig)
+
+    # Update PWM
+    pwm_placeholder.markdown(f"**PWM:** {pwm_full[-1]:.1f}")
+    pwm_bar.progress(int(pwm_full[-1]/255*100))
+
+    # Metrics calculation
+    error = np.array(y_data) - T_set
+    ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
+    rmse = np.sqrt(np.mean(error**2))
+    settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+
+    # UNDERSHOOT (transitorio)
+    transitory_end = int(0.2 * len(Tc_full))  # primeros 20% tiempo como transitorio
+    Tmin = np.min(Tc_full[:transitory_end])
+    undershoot = max(0.0, (T_set - Tmin) / T_set * 100)
+
+    recs = []
+    if abs(ss_error) > 0.5:
+        recs.append("Consider tuning controller to reduce steady-state error.")
+    if settling_time is None or settling_time > 150:
+        recs.append("Slow response → consider increasing gains for faster settling.")
+    metrics_text.markdown(
+        f"**Steady-state error:** {ss_error:.3f} °C  \n"
+        f"**RMSE:** {rmse:.3f}  \n"
+        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
+        f"**Undershoot:** {undershoot:.2f}%  \n"
+        + ("\n".join(f"- {r}" for r in recs))
+    )
+
+# DYNAMIC MODE: step-by-step with Start/Stop
+elif dynamic:
+    running = False
+    if start_stop:
+        running = not running
+    if 'running_state' not in st.session_state:
+        st.session_state['running_state'] = False
+    st.session_state['running_state'] = running
+
     if st.session_state['running_state']:
-        y_data = []
-        t_data = []
         fps = 4
         interval = 1.0 / fps
         start_time = time.time()
-
         for i in range(len(t_full)):
             current_time = time.time()
             elapsed_real = current_time - start_time
             if elapsed_real < t_full[i]:
                 time.sleep(t_full[i] - elapsed_real)
 
+            # Update data
             y_data.append(Tc_full[i])
             t_data.append(t_full[i])
 
@@ -163,18 +194,13 @@ if dynamic:
             plot_placeholder.pyplot(fig)
 
             # Update time elapsed
-            # -------------------
-            # Static mode does not use running loop
-            elapsed_placeholder = st.sidebar.empty()
-            pwm_placeholder = st.sidebar.empty()
-            pwm_bar = st.sidebar.empty()
             elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
 
             # Update PWM
             pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
             pwm_bar.progress(int(pwm_full[i]/255*100))
 
-            # Update metrics
+            # Metrics calculation
             error = np.array(y_data) - T_set
             ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
             rmse = np.sqrt(np.mean(error**2))
@@ -188,33 +214,6 @@ if dynamic:
             metrics_text.markdown(
                 f"**Steady-state error:** {ss_error:.3f} °C  \n"
                 f"**RMSE:** {rmse:.3f}  \n"
-                f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-                + ("\n".join(f"- {r}" for r in recs))
+                f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
+                + ("\n".join(f"\n- {r}" for r in recs))
             )
-
-# -------------------------------
-# Static mode (update immediately)
-# -------------------------------
-if static:
-    y_data = Tc_full
-    t_data = t_full
-    # Update line
-    line.set_data(t_data, y_data)
-    ax.set_xlim(0, duration)
-    plot_placeholder.pyplot(fig)
-
-    # Metrics
-    error = np.array(y_data) - T_set
-    ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
-    rmse = np.sqrt(np.mean(error**2))
-    # Undershoot
-    Tmin = np.min(Tc_full[:T_full.tolist().index(next(t for t in t_full if t >= 166))])
-    undershoot = max(0.0, (T_set - Tmin))
-    settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
-
-    metrics_text.markdown(
-        f"**Undershoot:** {undershoot:.3f} °C  \n"
-        f"**Steady-state error:** {ss_error:.3f} °C  \n"
-        f"**RMSE:** {rmse:.3f}  \n"
-        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
-    )
