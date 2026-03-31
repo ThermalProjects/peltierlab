@@ -28,25 +28,21 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Title in sidebar
+# SIDEBAR (controls + title)
 # -------------------------------
 st.sidebar.title("❄️ PeltierLab Interactive Simulator")
-st.sidebar.markdown(
-    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
-)
+st.sidebar.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
 
-# -------------------------------
-# SIDEBAR (controls)
-# -------------------------------
 st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
-# Simulation duration and start/stop
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-start_stop = st.sidebar.button("Start/Stop")
 
-# Elapsed time placeholder
+start_stop_col1, start_stop_col2 = st.sidebar.columns([1,1])
+start = start_stop_col1.button("Start")
+stop  = start_stop_col2.button("Stop")
+
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
 pwm_bar = st.sidebar.empty()
@@ -113,20 +109,18 @@ plot_placeholder = st.pyplot(fig)
 # -------------------------------
 # Metrics & recommendations
 # -------------------------------
-info_expander = st.expander("Model Information & Metrics", expanded=True)
-with info_expander:
-    metrics_text = st.empty()
+metrics_expander = st.expander("Model Information & Metrics", expanded=True)
+metrics_text = metrics_expander.empty()
 
 # -------------------------------
-# Simulation loop (4 FPS)
+# Simulation loop
 # -------------------------------
-running = False
-if start_stop:
-    running = not running
-
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
-st.session_state['running_state'] = running
+if start:
+    st.session_state['running_state'] = True
+if stop:
+    st.session_state['running_state'] = False
 
 if st.session_state['running_state']:
     y_data = []
@@ -149,33 +143,47 @@ if st.session_state['running_state']:
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
-        # Update time elapsed
+        # Update time and PWM
         elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
-
-        # Update PWM
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # Update metrics
+        # -----------------------
+        # Metrics
+        # -----------------------
         error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
         settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
 
-        # -------------------------------
-        # OVERSHOOT corregido
-        overshoot = '-' if len(y_data) < 5 else max(y_data) - T_set
+        # Overshoot: solo después de 2 cruces del setpoint
+        crossings = sum(
+            (y_data[k-1] < T_set and y_data[k] >= T_set) or
+            (y_data[k-1] > T_set and y_data[k] <= T_set)
+            for k in range(1, len(y_data))
+        )
+        if crossings < 2:
+            overshoot_val = "-"
+        else:
+            max_temp = max(y_data)
+            overshoot_val = max_temp - T_set if max_temp > T_set else 0
 
+        # Recommendations
         recs = []
         if abs(ss_error) > 0.5:
             recs.append("Consider tuning controller to reduce steady-state error.")
         if settling_time is None or settling_time > 150:
             recs.append("Slow response → consider increasing gains for faster settling.")
+        if mode in ["PID", "FOPID"]:
+            if Kp < 50:
+                recs.append("Kp may be too low → increase for faster response.")
+            if Ki > 10:
+                recs.append("Ki may be high → decrease to reduce overshoot.")
 
         metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
-            f"**Overshoot:** {overshoot if overshoot=='-' else f'{overshoot:.3f}'} °C  \n"
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
+            f"**Overshoot:** {overshoot_val}  \n"
             + ("\n".join(f"- {r}" for r in recs))
         )
