@@ -19,12 +19,17 @@ st.set_page_config(
 # Global parameters
 # -------------------------------
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
+T_start_default = 19.0
 
 Kp_default = 58.93
 Ki_default = 3.91
 Kd_default = 2.66
 lambda_default = 0.67
 mu_default = 1.47
+
+best_params_PID = {"Kp": Kp_default, "Ki": Ki_default, "Kd": Kd_default}
+best_params_FOPID = {"Kp": Kp_default, "Ki": Ki_default, "Kd": Kd_default,
+                     "Lambda": lambda_default, "Mu": mu_default}
 
 # -------------------------------
 # Title
@@ -48,14 +53,10 @@ static = control_type == "Static"
 
 # Simulation duration (only relevant for Dynamic)
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+start_stop = st.sidebar.button("Start/Stop") if dynamic else False
 
-# Start/Stop button for dynamic mode
-if dynamic:
-    if 'running_state' not in st.session_state:
-        st.session_state['running_state'] = False
-    start_stop = st.sidebar.button("Start/Stop")
-    if start_stop:
-        st.session_state['running_state'] = not st.session_state['running_state']
+# Ambient temperature
+T_amb = st.sidebar.slider("Ambient Temperature [°C]", 10.0, 30.0, 25.0, 0.1)
 
 # Placeholders
 elapsed_placeholder = st.sidebar.empty()
@@ -66,10 +67,6 @@ pwm_bar = st.sidebar.empty()
 # Compact sliders
 # -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
-    # Ambient temperature slider
-    T_amb = st.slider("Ambient Temperature [°C]", 5.0, 30.0, 19.0, 0.1)
-    T_start = T_amb  # 🔥 Starting temperature = ambient
-
     if mode in ["PID", "FOPID"]:
         T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
         bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
@@ -87,6 +84,7 @@ with st.sidebar.expander("Control Parameters", expanded=True):
 # -------------------------------
 # Prepare simulation data
 # -------------------------------
+T_start = T_amb  # start temp = ambient temp
 sim = None
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
@@ -102,7 +100,7 @@ if mode in ["PID", "FOPID"]:
             bias=bias, lam=lam, mu=mu
         )
 elif mode == "Hysteresis":
-    sim = SimulatorHysteresisReal(best_params, T_start=T_start, T_amb=T_amb)
+    sim = SimulatorHysteresisReal(best_params, T_start=T_start)
     t_full = np.linspace(0, duration, duration + 1)
     Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
         t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
@@ -116,7 +114,7 @@ fig, ax = plt.subplots(figsize=(7, 3.5))
 line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 ax.set_xlim(0, duration)
-ax.set_ylim(0, 30)
+ax.set_ylim(0, 20)
 ax.set_xlabel("Time [s]", fontsize=8)
 ax.set_ylabel("Temperature [°C]", fontsize=8)
 ax.tick_params(axis='both', labelsize=7)
@@ -167,6 +165,12 @@ if static:
         recs.append("Consider tuning controller to reduce steady-state error.")
     if settling_time is None or settling_time > 150:
         recs.append("Slow response → consider increasing gains for faster settling.")
+    # PSO recommendation
+    if mode == "PID":
+        recs.append(f"PSO suggested parameters: {best_params_PID}")
+    elif mode == "FOPID":
+        recs.append(f"PSO suggested parameters: {best_params_FOPID}")
+
     metrics_text.markdown(
         f"**Steady-state error:** {ss_error:.3f} °C  \n"
         f"**RMSE:** {rmse:.3f}  \n"
@@ -176,46 +180,60 @@ if static:
     )
 
 # DYNAMIC MODE: step-by-step with Start/Stop
-elif dynamic and st.session_state['running_state']:
-    fps = 4
-    interval = 1.0 / fps
-    start_time = time.time()
-    for i in range(len(t_full)):
-        current_time = time.time()
-        elapsed_real = current_time - start_time
-        if elapsed_real < t_full[i]:
-            time.sleep(t_full[i] - elapsed_real)
+elif dynamic:
+    running = False
+    if start_stop:
+        running = not running
+    if 'running_state' not in st.session_state:
+        st.session_state['running_state'] = False
+    st.session_state['running_state'] = running
 
-        # Update data
-        y_data.append(Tc_full[i])
-        t_data.append(t_full[i])
+    if st.session_state['running_state']:
+        fps = 4
+        interval = 1.0 / fps
+        start_time = time.time()
+        for i in range(len(t_full)):
+            current_time = time.time()
+            elapsed_real = current_time - start_time
+            if elapsed_real < t_full[i]:
+                time.sleep(t_full[i] - elapsed_real)
 
-        # Update line
-        line.set_data(t_data, y_data)
-        ax.set_xlim(0, duration)
-        plot_placeholder.pyplot(fig)
+            # Update data
+            y_data.append(Tc_full[i])
+            t_data.append(t_full[i])
 
-        # Update time elapsed
-        elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+            # Update line
+            line.set_data(t_data, y_data)
+            ax.set_xlim(0, duration)
+            plot_placeholder.pyplot(fig)
 
-        # Update PWM
-        pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
-        pwm_bar.progress(int(pwm_full[i]/255*100))
+            # Update time elapsed
+            elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
 
-        # Metrics calculation
-        error = np.array(y_data) - T_set
-        ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
-        rmse = np.sqrt(np.mean(error**2))
-        settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+            # Update PWM
+            pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
+            pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        recs = []
-        if abs(ss_error) > 0.5:
-            recs.append("Consider tuning controller to reduce steady-state error.")
-        if settling_time is None or settling_time > 150:
-            recs.append("Slow response → consider increasing gains for faster settling.")
-        metrics_text.markdown(
-            f"**Steady-state error:** {ss_error:.3f} °C  \n"
-            f"**RMSE:** {rmse:.3f}  \n"
-            f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
-            + ("\n".join(f"\n- {r}" for r in recs))
-        )
+            # Metrics calculation
+            error = np.array(y_data) - T_set
+            ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
+            rmse = np.sqrt(np.mean(error**2))
+            settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+
+            recs = []
+            if abs(ss_error) > 0.5:
+                recs.append("Consider tuning controller to reduce steady-state error.")
+            if settling_time is None or settling_time > 150:
+                recs.append("Slow response → consider increasing gains for faster settling.")
+            # PSO recommendation
+            if mode == "PID":
+                recs.append(f"PSO suggested parameters: {best_params_PID}")
+            elif mode == "FOPID":
+                recs.append(f"PSO suggested parameters: {best_params_FOPID}")
+
+            metrics_text.markdown(
+                f"**Steady-state error:** {ss_error:.3f} °C  \n"
+                f"**RMSE:** {rmse:.3f}  \n"
+                f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
+                + ("\n".join(f"\n- {r}" for r in recs))
+            )
