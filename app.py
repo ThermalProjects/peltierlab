@@ -1,189 +1,100 @@
-# app.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 
 from peltierlab.core.simulator import Simulator
+from peltierlab.core.simulator_fopid import SimulatorFOPID
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 
-# -------------------------------
-# Page config
-# -------------------------------
-st.set_page_config(
-    page_title="PeltierLab Simulator",
-    layout="wide"
-)
+# ------------------------------
+# CONFIGURACIÓN
+# ------------------------------
+st.set_page_config(page_title="❄️ PeltierLab Interactive Simulator", layout="wide")
 
-# -------------------------------
-# Global parameters
-# -------------------------------
-best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
-T_start = 19.0
+# Barra lateral
+with st.sidebar:
+    st.title("❄️ PeltierLab Interactive Simulator")
+    st.write("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
 
-Kp_default = 58.93
-Ki_default = 3.91
-Kd_default = 2.66
-lambda_default = 0.67
-mu_default = 1.47
+    # Control type
+    control_type = st.selectbox("Control Type", ["PID", "FOPID", "Hysteresis"])
 
-BAND = 0.5  # Para calcular settling time ±0.5°C
+    # Dynamic / Static mode
+    mode = st.radio("Mode", ["Dynamic", "Static"], horizontal=True)
 
-# -------------------------------
-# Sidebar title & description
-# -------------------------------
-st.sidebar.title("❄️ PeltierLab Interactive Simulator")
-st.sidebar.markdown(
-    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
-)
+    # Start / Stop
+    col1, col2, col3, col4 = st.columns([1,1,1,1])
+    with col1:
+        start_btn = st.button("Start")
+    with col2:
+        stop_btn = st.button("Stop")
+    with col3:
+        time_display = st.empty()
+    with col4:
+        pwm_display = st.empty()
 
-# -------------------------------
-# SIDEBAR (controls)
-# -------------------------------
-st.sidebar.header("Settings")
-mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+    # Recommendations (moved to bottom)
+    st.write("---")
+    st.subheader("Recommendations")
+    recommendations = st.empty()
 
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-start_stop = st.sidebar.button("Start/Stop")
+# ------------------------------
+# SIMULADOR
+# ------------------------------
+simulator_map = {
+    "PID": Simulator,
+    "FOPID": SimulatorFOPID,
+    "Hysteresis": SimulatorHysteresisReal
+}
 
-# Time & PWM placeholders in sidebar
-elapsed_placeholder = st.sidebar.empty()
-pwm_placeholder = st.sidebar.empty()
-pwm_bar = st.sidebar.empty()
+sim = simulator_map[control_type]()
 
-# -------------------------------
-# Compact sliders
-# -------------------------------
-with st.sidebar.expander("Control Parameters", expanded=True):
-    if mode in ["PID", "FOPID"]:
-        T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
-        bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-        Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
-        Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
-        Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-
-        if mode == "FOPID":
-            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
-            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-
-    elif mode == "Hysteresis":
-        T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
-        dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
-        dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
-
-# -------------------------------
-# Prepare simulation data
-# -------------------------------
-if mode in ["PID", "FOPID"]:
-    sim = Simulator(best_params, T_start=T_start)
-    t_full = np.linspace(0, duration, duration + 1)
-    if mode == "PID":
-        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lambda_default, mu=mu_default
-        )
-    else:
-        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lam, mu=mu
-        )
-elif mode == "Hysteresis":
-    sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-    t_full = np.linspace(0, duration, duration + 1)
-    Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
-        t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
-    )
-
-# -------------------------------
-# Plot placeholders
-# -------------------------------
-st.subheader(f"Results: {mode}")
-fig, ax = plt.subplots(figsize=(7, 3.5))
-line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
-ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
-ax.set_xlim(0, duration)
-ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=8)
-ax.set_ylabel("Temperature [°C]", fontsize=8)
-ax.tick_params(axis='both', labelsize=7)
-ax.grid(True, lw=0.5)
-ax.legend(fontsize=7)
-plot_placeholder = st.pyplot(fig)
-
-# -------------------------------
-# Metrics & recommendations
-# -------------------------------
-info_expander = st.expander("Model Information & Metrics", expanded=True)
-with info_expander:
-    metrics_text = st.empty()
-
-# -------------------------------
-# Simulation loop (4 FPS)
-# -------------------------------
 running = False
-if start_stop:
-    running = not running
+y_data = []
+t_data = []
 
-if 'running_state' not in st.session_state:
-    st.session_state['running_state'] = False
-st.session_state['running_state'] = running
+T_set = 50.0  # referencia de temperatura
+dt = 0.1
 
-if st.session_state['running_state']:
-    y_data = []
-    t_data = []
-    fps = 4
-    interval = 1.0 / fps
-    start_time = time.time()
+undershoot = 0.0  # inicializamos
 
-    for i in range(len(t_full)):
-        current_time = time.time()
-        elapsed_real = current_time - start_time
-        if elapsed_real < t_full[i]:
-            time.sleep(t_full[i] - elapsed_real)
+while True:
+    if start_btn:
+        running = True
+    if stop_btn:
+        running = False
 
-        y_data.append(Tc_full[i])
-        t_data.append(t_full[i])
+    if running:
+        t_next = t_data[-1] + dt if t_data else 0.0
+        y_next = sim.step(T_set)
+        y_data.append(y_next)
+        t_data.append(t_next)
 
-        # Update line
-        line.set_data(t_data, y_data)
-        ax.set_xlim(0, duration)
-        plot_placeholder.pyplot(fig)
+        # ------------------------------
+        # Calculo undershoot (FIX: no falla si array vacío)
+        # ------------------------------
+        transitory_end = int(len(t_data)/2)  # ejemplo de final de transitorio
+        if len(y_data[:transitory_end]) > 0:
+            Tmin = np.min(np.array(y_data[:transitory_end]))
+            undershoot = max(0.0, (T_set - Tmin) / T_set * 100.0)
+        else:
+            undershoot = 0.0
 
-        # Update time elapsed
-        elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+    # ------------------------------
+    # Mostrar gráficos y métricas
+    # ------------------------------
+    fig, ax = plt.subplots()
+    ax.plot(t_data, y_data, label="Tsup")
+    ax.axhline(T_set, color="r", linestyle="--", label="Tref")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Temperature (°C)")
+    ax.legend()
+    st.pyplot(fig)
 
-        # Update PWM
-        pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
-        pwm_bar.progress(int(pwm_full[i]/255*100))
+    # Mostrar métricas
+    time_display.text(f"Time: {t_data[-1]:.2f} s" if t_data else "Time: 0.00 s")
+    pwm_display.text(f"PWM: {sim.get_pwm():.2f}" if hasattr(sim, "get_pwm") else "PWM: -")
+    recommendations.text(f"Undershoot: {undershoot:.2f}%")
 
-        # -------------------------------
-        # Update metrics
-        # -------------------------------
-        error = np.array(y_data) - T_set
-
-        # -------------------------------
-        # Calculate undershoot like in your script
-        # Only consider transitory: t < duration/3 as ejemplo
-        transitory_end = int(len(error)/3)
-        Tmin = np.min(np.array(y_data[:transitory_end]))
-        undershoot = max(0.0, (T_set - Tmin) / T_set * 100.0)
-
-        # Settling time ±BAND
-        settling_time = next((t_data[j] for j in range(len(y_data)) 
-                              if np.all(np.abs(np.array(y_data[j:]) - T_set) <= BAND)), None)
-
-        # RMSE
-        rmse = np.sqrt(np.mean(error**2))
-
-        recs = []
-        if abs(error[-1]) > 0.5:
-            recs.append("Consider tuning controller to reduce steady-state error.")
-        if settling_time is None or settling_time > 150:
-            recs.append("Slow response → consider increasing gains for faster settling.")
-
-        metrics_text.markdown(
-            f"**Undershoot:** {undershoot:.2f}%  \n"
-            f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-            f"**RMSE:** {rmse:.3f}  \n"
-            + ("\n".join(f"- {r}" for r in recs))
-        )
+    time.sleep(0.05)
