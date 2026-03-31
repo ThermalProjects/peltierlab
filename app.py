@@ -36,10 +36,23 @@ st.sidebar.header("Settings")
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-# Dynamic / Static toggle side by side
+# Dynamic / Static toggle (mutually exclusive)
 col1, col2 = st.sidebar.columns(2)
-dynamic_mode = col1.checkbox("Dynamic", value=True)
-static_mode = col2.checkbox("Static", value=not dynamic_mode)
+if 'dynamic_mode' not in st.session_state:
+    st.session_state.dynamic_mode = True
+if 'static_mode' not in st.session_state:
+    st.session_state.static_mode = False
+
+dynamic_checked = col1.checkbox("Dynamic", value=st.session_state.dynamic_mode)
+static_checked = col2.checkbox("Static", value=st.session_state.static_mode)
+
+# Exclusivity
+if dynamic_checked:
+    st.session_state.dynamic_mode = True
+    st.session_state.static_mode = False
+if static_checked:
+    st.session_state.static_mode = True
+    st.session_state.dynamic_mode = False
 
 start_button = st.sidebar.button("Start")
 stop_button = st.sidebar.button("Stop")
@@ -66,6 +79,21 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
+
+# -------------------------------
+# Initialize session state
+# -------------------------------
+if 'running' not in st.session_state:
+    st.session_state.running = False
+if 'idx' not in st.session_state:
+    st.session_state.idx = 0
+
+# Start / Stop buttons
+if start_button:
+    st.session_state.running = True
+    st.session_state.idx = 0  # reset to start
+if stop_button:
+    st.session_state.running = False
 
 # -------------------------------
 # Prepare simulation
@@ -106,55 +134,32 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics & recommendations (below sidebar)
+# Metrics & recommendations
 # -------------------------------
 metrics_expander = st.expander("Metrics & Recommendations", expanded=True)
 metrics_placeholder = metrics_expander.empty()
 
 # -------------------------------
-# Initialize session state
+# Simulation update
 # -------------------------------
-if 'running' not in st.session_state:
-    st.session_state.running = False
-if 'idx' not in st.session_state:
-    st.session_state.idx = 0
-
-# Start/Stop buttons
-if start_button:
-    st.session_state.running = True
-if stop_button:
-    st.session_state.running = False
-
-# -------------------------------
-# Simulation update (Dynamic)
-# -------------------------------
-if dynamic_mode:
-    fps = 4
-    interval = 1.0 / fps
-    y_data = Tc_full[:st.session_state.idx+1].tolist()
-    t_data = t_full[:st.session_state.idx+1].tolist()
-
+if st.session_state.dynamic_mode:
+    # Dynamic: advance frame by frame
     if st.session_state.running and st.session_state.idx < len(t_full)-1:
-        start_time = time.time()
-        for _ in range(fps):  # advance by ~1s
-            if st.session_state.idx >= len(t_full)-1:
-                break
-            st.session_state.idx += 1
-            y_data.append(Tc_full[st.session_state.idx])
-            t_data.append(t_full[st.session_state.idx])
-            time.sleep(interval/2)  # small sleep for smooth update
+        st.session_state.idx += 1
 
-    # Update plot
+    y_data = Tc_full[:st.session_state.idx+1]
+    t_data = t_full[:st.session_state.idx+1]
+
     line.set_data(t_data, y_data)
     ax.set_xlim(0, duration)
     plot_placeholder.pyplot(fig)
 
-    # Update time & PWM
+    # Time & PWM
     elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_data[-1])} s")
     pwm_placeholder.markdown(f"**PWM:** {pwm_full[st.session_state.idx]:.1f}")
     pwm_bar.progress(int(pwm_full[st.session_state.idx]/255*100))
 
-    # Metrics calculation
+    # Metrics
     error = np.array(y_data) - T_set
     ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
     rmse = np.sqrt(np.mean(error**2))
@@ -163,12 +168,9 @@ if dynamic_mode:
 
     recs = []
     if mode != "Hysteresis":
-        if ss_error > 0.5:
-            recs.append("Consider decreasing Kp to reduce steady-state error.")
-        if ss_error < -0.5:
-            recs.append("Consider increasing Kp to reduce steady-state error.")
-        if settling_time is None or settling_time > 150:
-            recs.append("Increase Kp or Ki for faster settling.")
+        if ss_error > 0.5: recs.append("Decrease Kp to reduce steady-state error.")
+        if ss_error < -0.5: recs.append("Increase Kp to reduce steady-state error.")
+        if settling_time is None or settling_time > 150: recs.append("Increase Kp or Ki for faster settling.")
 
     metrics_placeholder.markdown(
         f"**Steady-state error:** {ss_error:.2f} °C  \n"
@@ -179,9 +181,9 @@ if dynamic_mode:
     )
 
 # -------------------------------
-# Static mode: show full simulation instantly
+# Static mode: full simulation
 # -------------------------------
-if static_mode:
+if st.session_state.static_mode:
     line.set_data(t_full, Tc_full)
     ax.set_xlim(0, duration)
     plot_placeholder.pyplot(fig)
@@ -198,12 +200,9 @@ if static_mode:
 
     recs = []
     if mode != "Hysteresis":
-        if ss_error > 0.5:
-            recs.append("Consider decreasing Kp to reduce steady-state error.")
-        if ss_error < -0.5:
-            recs.append("Consider increasing Kp to reduce steady-state error.")
-        if settling_time is None or settling_time > 150:
-            recs.append("Increase Kp or Ki for faster settling.")
+        if ss_error > 0.5: recs.append("Decrease Kp to reduce steady-state error.")
+        if ss_error < -0.5: recs.append("Increase Kp to reduce steady-state error.")
+        if settling_time is None or settling_time > 150: recs.append("Increase Kp or Ki for faster settling.")
 
     metrics_placeholder.markdown(
         f"**Steady-state error:** {ss_error:.2f} °C  \n"
