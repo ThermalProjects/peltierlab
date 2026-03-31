@@ -42,9 +42,23 @@ st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
-# Simulation duration and start/stop
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-start_stop = st.sidebar.button("Start/Stop")
+# -------------------------------
+# Start / Stop buttons
+# -------------------------------
+if 'running_state' not in st.session_state:
+    st.session_state['running_state'] = False
+
+# Coloca los botones Start y Stop en la misma fila
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    if st.button("Start"):
+        st.session_state['running_state'] = True
+with col2:
+    if st.button("Stop"):
+        st.session_state['running_state'] = False
+
+running = st.session_state['running_state']
+
 
 # Elapsed time placeholder
 elapsed_placeholder = st.sidebar.empty()
