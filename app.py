@@ -28,22 +28,30 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# SIDEBAR
+# Title
 # -------------------------------
 st.sidebar.title("❄️ PeltierLab Interactive Simulator")
+st.markdown(
+    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
+)
+
+# -------------------------------
+# SIDEBAR (controls)
+# -------------------------------
+st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+
+# Simulation duration and start/stop
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+col1, col2 = st.sidebar.columns(2)
+start_button = col1.button("Start")
+stop_button = col2.button("Stop")
 
-# Botones Start / Stop uno al lado del otro
-col1, col2 = st.sidebar.columns([1,1])
-start = col1.button("Start")
-stop  = col2.button("Stop")
-
-# Time y PWM justo debajo de los botones
+# Elapsed time placeholder
 elapsed_placeholder = st.sidebar.empty()
-pwm_placeholder     = st.sidebar.empty()
-pwm_bar             = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
 
 # -------------------------------
 # Compact sliders
@@ -108,73 +116,59 @@ plot_placeholder = st.pyplot(fig)
 # Metrics & recommendations
 # -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
-metrics_text = st.empty()
+with info_expander:
+    metrics_text = st.empty()
 
 # -------------------------------
 # Simulation loop (4 FPS)
 # -------------------------------
-if 'running' not in st.session_state:
-    st.session_state.running = False
-if 'y_data' not in st.session_state or len(st.session_state.y_data) == 0:
-    st.session_state.y_data = []
-if 't_data' not in st.session_state or len(st.session_state.t_data) == 0:
-    st.session_state.t_data = []
-if 'idx' not in st.session_state:
-    st.session_state.idx = 0
+if 'running_state' not in st.session_state:
+    st.session_state['running_state'] = False
+if start_button:
+    st.session_state['running_state'] = True
+if stop_button:
+    st.session_state['running_state'] = False
 
-# Start reinicia desde cero correctamente
-if start:
-    st.session_state.running = True
-    st.session_state.idx = 0
-    st.session_state.y_data = [Tc_full[0]]
-    st.session_state.t_data = [t_full[0]]
-
-# Stop solo pausa
-if stop:
-    st.session_state.running = False
-
-if st.session_state.running:
+if st.session_state['running_state']:
+    y_data = []
+    t_data = []
     fps = 4
     interval = 1.0 / fps
-    start_time = time.time() - (st.session_state.t_data[-1] if len(st.session_state.t_data)>0 else 0)
+    start_time = time.time()
 
-    for i in range(st.session_state.idx, len(t_full)):
+    for i in range(len(t_full)):
         current_time = time.time()
         elapsed_real = current_time - start_time
         if elapsed_real < t_full[i]:
             time.sleep(t_full[i] - elapsed_real)
 
-        st.session_state.y_data.append(Tc_full[i])
-        st.session_state.t_data.append(t_full[i])
-        st.session_state.idx = i
+        y_data.append(Tc_full[i])
+        t_data.append(t_full[i])
 
         # Update line
-        line.set_data(st.session_state.t_data, st.session_state.y_data)
+        line.set_data(t_data, y_data)
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
         # Update time elapsed
-        elapsed_placeholder.markdown(f"**Time elapsed:** {int(st.session_state.t_data[-1])} s")
+        elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
 
         # Update PWM
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
         # Update metrics
-        error = np.array(st.session_state.y_data) - T_set
+        error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
-        overshoot = max(st.session_state.y_data) - T_set
-        settling_time = next((st.session_state.t_data[j] for j in range(len(st.session_state.y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+        overshoot = max(y_data) - T_set if len(y_data) > 1 else 0.0  # <-- CORREGIDO
+        settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
 
         recs = []
-        if mode != "Hysteresis":
-            if abs(ss_error) > 0.5:
-                recs.append("Consider tuning controller to reduce steady-state error.")
-            if settling_time is None or settling_time > 150:
-                recs.append("Slow response → consider increasing gains for faster settling.")
-            if overshoot > 1:
-                recs.append("Overshoot high → consider lowering Kp or Kd.")
+        if abs(ss_error) > 0.5:
+            recs.append("Consider tuning controller to reduce steady-state error.")
+        if settling_time is None or settling_time > 150:
+            recs.append("Slow response → consider increasing gains for faster settling.")
         metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
