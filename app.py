@@ -11,163 +11,147 @@ from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 # Page config
 # -------------------------------
 st.set_page_config(
-    page_title="PeltierLab Simulator",
-    layout="centered"
+    page_title="PeltierLab Dashboard",
+    layout="wide"
 )
 
 # -------------------------------
 # Global parameters
 # -------------------------------
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
-T_start_default = 19.0
+T_start = 19.0
 
-pid_ref = [58.93, 3.91, 2.66]
-fopid_ref = [58.93, 3.91, 2.66, 0.67, 1.47]
-
-# -------------------------------
-# TITLE
-# -------------------------------
-st.markdown("### PeltierLab Thermal Simulator")
-st.markdown("*Interactive PID / FOPID / Hysteresis control*")
+# Default controller params (PSO reference)
+PID_ref = {"Kp": 58.93, "Ki": 3.91, "Kd": 2.66}
+FOPID_ref = {"Kp": 58.93, "Ki": 3.91, "Kd": 2.66, "lam": 0.67, "mu": 1.47}
 
 # -------------------------------
-# CONTROLS
+# Grid layout: 5x4
 # -------------------------------
-st.markdown("**Settings:**")
+grid = st.container()
+cols = grid.columns([1,1,1,1,1])  # 5 columnas
 
-col1, col2, col3, col4 = st.columns([1,1,1,2])
-with col1:
-    mode = st.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-with col2:
-    start_btn = st.button("Start")
-with col3:
-    pause_btn = st.button("Pause")
-with col4:
-    stop_btn = st.button("Stop")
+# Title + Mode selector (fila 0)
+with cols[0]:
+    st.markdown("## PeltierLab Dashboard")
+with cols[1]:
+    mode = st.selectbox("Control Mode", ["PID", "FOPID", "Hysteresis"], index=1)
 
-# Parameters sliders
-st.markdown("**Parameters:**")
-T_start = st.number_input("Ambient Temperature [°C]", min_value=0.0, max_value=40.0, value=T_start_default, step=0.1)
-
-if mode in ["PID", "FOPID"]:
+# -------------------------------
+# Left controls panel (cols 0-1, filas 1-3)
+# -------------------------------
+control_cols = st.columns([1,1])
+with control_cols[0]:
+    st.markdown("### Controller Parameters")
     T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
-    bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-    Kp = st.slider("Kp", 0, 200, 80, 1)
-    Ki = st.slider("Ki", 0.0, 50.0, 3.91, 0.1)
-    Kd = st.slider("Kd", 0.0, 50.0, 2.66, 0.1)
-    if mode == "FOPID":
-        lam = st.slider("Lambda (λ)", 0.1, 2.0, 0.67, 0.01)
-        mu = st.slider("Mu (μ)", 0.1, 2.0, 1.47, 0.01)
-elif mode == "Hysteresis":
-    T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
-    dT1 = st.slider("Upper band dT1 [°C]", 0.1, 1.0, 0.5, 0.1)
-    dT2 = st.slider("Lower band dT2 [°C]", 0.1, 1.0, 0.5, 0.1)
+    T_amb = st.slider("Ambient Temp [°C]", 15.0, 30.0, 20.0, 0.1)
+    Kp = st.number_input("Kp", value=PID_ref["Kp"] if mode=="PID" else FOPID_ref["Kp"])
+    Ki = st.number_input("Ki", value=PID_ref["Ki"] if mode=="PID" else FOPID_ref["Ki"])
+    Kd = st.number_input("Kd", value=PID_ref["Kd"] if mode=="PID" else FOPID_ref["Kd"])
+    if mode=="FOPID":
+        lam = st.number_input("Lambda (λ)", value=FOPID_ref["lam"])
+        mu = st.number_input("Mu (μ)", value=FOPID_ref["mu"])
+
+with control_cols[1]:
+    st.markdown("### Simulation Control")
+    col_btns = st.columns(3)
+    if "running" not in st.session_state:
+        st.session_state.running = False
+        st.session_state.paused = False
+    start = col_btns[0].button("Start")
+    pause = col_btns[1].button("Pause")
+    stop = col_btns[2].button("Stop")
+
+    duration = st.number_input("Duration [s]", value=300, min_value=50, max_value=600, step=10)
 
 # -------------------------------
-# SESSION STATE INIT
+# Handle simulation state
 # -------------------------------
-if 'running' not in st.session_state:
-    st.session_state.running = False
-if 'paused' not in st.session_state:
-    st.session_state.paused = False
-if 't_data' not in st.session_state:
-    st.session_state.t_data = []
-if 'y_data' not in st.session_state:
-    st.session_state.y_data = []
-if 'pwm_data' not in st.session_state:
-    st.session_state.pwm_data = []
-if 'sim_index' not in st.session_state:
-    st.session_state.sim_index = 0
-
-# Handle buttons
-if start_btn:
+if start:
     st.session_state.running = True
     st.session_state.paused = False
-if pause_btn:
+if pause:
     st.session_state.paused = True
-    st.session_state.running = False
-if stop_btn:
+if stop:
     st.session_state.running = False
     st.session_state.paused = False
     st.session_state.t_data = []
     st.session_state.y_data = []
-    st.session_state.pwm_data = []
-    st.session_state.sim_index = 0
 
 # -------------------------------
-# SIMULATION PREP
+# Prepare simulation data
 # -------------------------------
-duration = 300
-t_full = np.linspace(0, duration, duration+1)
+if "t_data" not in st.session_state:
+    st.session_state.t_data = []
+    st.session_state.y_data = []
+
+sim = None
+t_full = np.linspace(0, duration, duration + 1)
 
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
-    Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-        t_custom=t_full,
-        T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-        bias=bias,
-        lam=lam if mode=="FOPID" else 0.67,
-        mu=mu if mode=="FOPID" else 1.47
-    )
+    if mode=="PID":
+        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
+            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+            bias=0.0, lam=1.0, mu=1.0
+        )
+    else:
+        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
+            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+            bias=0.0, lam=lam, mu=mu
+        )
 elif mode=="Hysteresis":
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-    Tc_full, _, _, pwm_full = sim.simulate(
-        t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
+    Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
+        t_custom=t_full, T_set=T_set, dT1=0.5, dT2=0.5, P_max=5.0
     )
 
 # -------------------------------
-# PLOT
+# Center Graph (cols 2-3, filas 1-2)
 # -------------------------------
-st.markdown("**Simulation:**")
-fig, ax = plt.subplots(figsize=(6,3))
-line, = ax.plot(st.session_state.t_data, st.session_state.y_data, lw=1.5, color='blue')
-ax.axhline(T_set, color='red', linestyle='--')
-ax.set_xlim(0, duration)
-ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=8)
-ax.set_ylabel("Temperature [°C]", fontsize=8)
-ax.grid(True, lw=0.5)
-plot_placeholder = st.pyplot(fig, clear_figure=True)
+graph_cols = st.columns([1,1])
+with graph_cols[0]:
+    st.markdown("### Temperature Response")
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.set_xlim(0, duration)
+    ax.set_ylim(0, 25)
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Temp [°C]")
+    ax.grid(True, lw=0.5)
+    line, = ax.plot(st.session_state.t_data, st.session_state.y_data, color='blue', lw=2)
+    ax.axhline(T_set, color='red', linestyle='--', label="Setpoint")
+    ax.legend()
+    st.pyplot(fig, clear_figure=False)
 
 # -------------------------------
-# METRICS & REFERENCE
+# Right metrics panel (cols 3-4)
 # -------------------------------
-st.markdown("**Metrics:**")
-if st.session_state.y_data:
-    y_arr = np.array(st.session_state.y_data)
-    error = y_arr - T_set
-    ss_error = np.mean(error[-50:]) if len(error)>50 else np.mean(error)
-    rmse = np.sqrt(np.mean(error**2))
-    settling_time = next((st.session_state.t_data[j] for j in range(len(y_arr)) if np.all(np.abs(error[j:])<=0.5)), None)
-else:
-    ss_error = 0
-    rmse = 0
-    settling_time = None
+metrics_cols = st.columns(1)
+with metrics_cols[0]:
+    st.markdown("### Metrics & Reference")
+    if mode=="PID":
+        st.markdown("**Reference optimal PID (PSO):**")
+        st.text(f"Kp = {PID_ref['Kp']}, Ki = {PID_ref['Ki']}, Kd = {PID_ref['Kd']}")
+    else:
+        st.markdown("**Reference optimal FOPID (PSO):**")
+        st.text(f"Kp = {FOPID_ref['Kp']}, Ki = {FOPID_ref['Ki']}, Kd = {FOPID_ref['Kd']}, λ = {FOPID_ref['lam']}, μ = {FOPID_ref['mu']}")
 
-st.markdown(f"**Time elapsed:** {int(st.session_state.t_data[-1]) if st.session_state.t_data else 0} s")
-st.markdown(f"**Steady-state error:** {ss_error:.3f} °C")
-st.markdown(f"**RMSE:** {rmse:.3f}")
-st.markdown(f"**Settling time:** {settling_time if settling_time else 'Not reached'} s")
-
-# Reference optimal
-if mode=="PID":
-    ref_txt = f"**Reference optimal PID (PSO):**\nKp = {pid_ref[0]}, Ki = {pid_ref[1]}, Kd = {pid_ref[2]}"
-else:
-    ref_txt = f"**Reference optimal FOPID (PSO):**\nKp = {fopid_ref[0]}, Ki = {fopid_ref[1]}, Kd = {fopid_ref[2]}, λ = {fopid_ref[3]}, μ = {fopid_ref[4]}"
-st.markdown(ref_txt)
+    # Real-time metrics
+    if len(st.session_state.y_data)>0:
+        error = np.array(st.session_state.y_data) - T_set
+        rmse = np.sqrt(np.mean(error**2))
+        ss_error = np.mean(error[-50:]) if len(error)>50 else np.mean(error)
+        settling_time = next((t_full[i] for i in range(len(error)) if np.all(np.abs(error[i:])<=0.5)), None)
+        st.text(f"Steady-state error: {ss_error:.3f} °C")
+        st.text(f"RMSE: {rmse:.3f}")
+        st.text(f"Settling time: {settling_time if settling_time else 'Not reached'} s")
 
 # -------------------------------
-# SIMULATION LOOP
+# Update simulation if running
 # -------------------------------
-if st.session_state.running and st.session_state.sim_index < len(t_full):
-    for i in range(st.session_state.sim_index, len(t_full)):
-        if st.session_state.paused:
-            break
+if st.session_state.running and not st.session_state.paused:
+    for i in range(len(t_full)):
         st.session_state.t_data.append(t_full[i])
         st.session_state.y_data.append(Tc_full[i])
-        st.session_state.pwm_data.append(pwm_full[i])
-        st.session_state.sim_index += 1
-
-        # Update plot
-        line.set_data(st.session_state.t_data, st.session_state.y_data)
-        plot_placeholder.pyplot(fig, clear_figure=True)
+        time.sleep(0.01)
+        st.experimental_rerun()  # update in real-time
