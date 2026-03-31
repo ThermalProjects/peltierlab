@@ -2,6 +2,7 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 from peltierlab.core.simulator import Simulator
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
@@ -93,7 +94,7 @@ if start_pause:
 # -------------------------------
 # Generate simulation data
 # -------------------------------
-def generate_sim_data():
+if not st.session_state.sim_data:
     t_full = np.linspace(0, duration, duration + 1)
     if mode in ["PID", "FOPID"]:
         sim = Simulator(best_params, T_start=T_start)
@@ -112,14 +113,9 @@ def generate_sim_data():
         Tc_full, _, _, pwm_full = sim.simulate(
             t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
         )
-    return list(Tc_full), list(pwm_full), list(t_full)
-
-# Only generate sim data once or if empty
-if not st.session_state.sim_data:
-    Tc_full, pwm_full, t_full = generate_sim_data()
-    st.session_state.sim_data = Tc_full
-    st.session_state.pwm_data = pwm_full
-    st.session_state.t_full = t_full
+    st.session_state.sim_data = list(Tc_full)
+    st.session_state.pwm_data = list(pwm_full)
+    st.session_state.t_full = list(t_full)
 
 # -------------------------------
 # Placeholders
@@ -131,14 +127,17 @@ pwm_bar = st.sidebar.empty()
 metrics_text = st.sidebar.empty()
 
 # -------------------------------
-# Simulation update (step-wise)
+# Update simulation step
 # -------------------------------
+fps = 4
 if st.session_state.running:
     if st.session_state.current_idx < len(st.session_state.sim_data):
-        idx = st.session_state.current_idx
-        st.session_state.t_data.append(st.session_state.t_full[idx])
-        st.session_state.y_data.append(st.session_state.sim_data[idx])
+        st.session_state.t_data.append(st.session_state.t_full[st.session_state.current_idx])
+        st.session_state.y_data.append(st.session_state.sim_data[st.session_state.current_idx])
         st.session_state.current_idx += 1
+        # Wait to match FPS
+        time.sleep(1/fps)
+        st.experimental_rerun()
 
 # -------------------------------
 # Plot
