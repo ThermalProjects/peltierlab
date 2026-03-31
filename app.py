@@ -8,15 +8,50 @@ from peltierlab.core.simulator import Simulator
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 
 # -------------------------------
-# Page config
+# Config
 # -------------------------------
-st.set_page_config(
-    page_title="PeltierLab Simulator",
-    layout="wide"
-)
+st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
 
 # -------------------------------
-# Global parameters
+# Session state
+# -------------------------------
+if "running" not in st.session_state:
+    st.session_state.running = False
+
+if "idx" not in st.session_state:
+    st.session_state.idx = 1  # evitar gráfico vacío
+
+# -------------------------------
+# Sidebar
+# -------------------------------
+st.sidebar.markdown("## ❄️ PeltierLab Simulator")
+st.sidebar.markdown("---")
+
+sim_type = st.sidebar.radio(
+    "Mode",
+    ["Dynamic", "Static"],
+    horizontal=True
+)
+
+mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+
+# -------------------------------
+# Buttons
+# -------------------------------
+if sim_type == "Dynamic":
+    col1, col2 = st.sidebar.columns(2)
+
+    if col1.button("Start"):
+        st.session_state.running = True
+
+    if col2.button("Stop"):
+        st.session_state.running = False
+else:
+    st.sidebar.info("Static mode: instant response")
+
+# -------------------------------
+# Defaults
 # -------------------------------
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
 T_start = 19.0
@@ -28,189 +63,182 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Sidebar: Title + Settings
-# -------------------------------
-st.sidebar.title("❄️ PeltierLab Interactive Simulator")
-st.sidebar.header("Settings")
-
-mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-
-# Dynamic / Static toggle (mutually exclusive)
-col1, col2 = st.sidebar.columns(2)
-if 'dynamic_mode' not in st.session_state:
-    st.session_state.dynamic_mode = True
-if 'static_mode' not in st.session_state:
-    st.session_state.static_mode = False
-
-dynamic_checked = col1.checkbox("Dynamic", value=st.session_state.dynamic_mode)
-static_checked = col2.checkbox("Static", value=st.session_state.static_mode)
-
-# Exclusivity
-if dynamic_checked:
-    st.session_state.dynamic_mode = True
-    st.session_state.static_mode = False
-if static_checked:
-    st.session_state.static_mode = True
-    st.session_state.dynamic_mode = False
-
-start_button = st.sidebar.button("Start")
-stop_button = st.sidebar.button("Stop")
-
-# Time & PWM placeholders
-elapsed_placeholder = st.sidebar.empty()
-pwm_placeholder = st.sidebar.empty()
-pwm_bar = st.sidebar.empty()
-
-# -------------------------------
-# Control sliders
+# Controls
 # -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
+
+    lam = lambda_default
+    mu = mu_default
+
     if mode in ["PID", "FOPID"]:
         T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
         bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
         Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-    else:  # Hysteresis
+
+    else:
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
-        dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
-        dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
+        dT1 = st.slider("Upper band (dT1)", 0.1, 1.0, 0.5, 0.1)
+        dT2 = st.slider("Lower band (dT2)", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Initialize session state
+# Simulation
 # -------------------------------
-if 'running' not in st.session_state:
-    st.session_state.running = False
-if 'idx' not in st.session_state:
-    st.session_state.idx = 0
+t_full = np.linspace(0, duration, duration + 1)
 
-# Start / Stop buttons
-if start_button:
-    st.session_state.running = True
-    st.session_state.idx = 0  # reset to start
-if stop_button:
-    st.session_state.running = False
-
-# -------------------------------
-# Prepare simulation
-# -------------------------------
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
-    t_full = np.linspace(0, duration, duration + 1)
-    if mode == "PID":
-        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lambda_default, mu=mu_default
-        )
-    else:
-        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lam, mu=mu
-        )
-elif mode == "Hysteresis":
+
+    Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
+        t_custom=t_full,
+        T_set=T_set,
+        Kp=Kp, Ki=Ki, Kd=Kd,
+        bias=bias,
+        lam=lam,
+        mu=mu
+    )
+
+else:
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-    t_full = np.linspace(0, duration, duration + 1)
-    Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
-        t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
+
+    Tc_full, _, _, pwm_full = sim.simulate(
+        t_custom=t_full,
+        T_set=T_set,
+        dT1=dT1,
+        dT2=dT2,
+        P_max=5.0
     )
 
 # -------------------------------
-# Plot setup
+# Plot
 # -------------------------------
-fig, ax = plt.subplots(figsize=(7,3.5))
-line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
-ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
-ax.set_xlim(0, duration)
-ax.set_ylim(0, 20)
-ax.set_xlabel("Time [s]", fontsize=8)
-ax.set_ylabel("Temperature [°C]", fontsize=8)
-ax.tick_params(axis='both', labelsize=7)
-ax.grid(True, lw=0.5)
-ax.legend(fontsize=7)
-plot_placeholder = st.pyplot(fig)
+st.subheader(f"{mode} Simulation")
 
 # -------------------------------
-# Metrics & recommendations
+# STATIC
 # -------------------------------
-metrics_expander = st.expander("Metrics & Recommendations", expanded=True)
-metrics_placeholder = metrics_expander.empty()
+if sim_type == "Static":
 
-# -------------------------------
-# Simulation update
-# -------------------------------
-def update_dynamic():
-    if st.session_state.running and st.session_state.idx < len(t_full)-1:
-        st.session_state.idx += 1
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    ax.plot(t_full, Tc_full, lw=1.5)
+    ax.axhline(T_set, linestyle="--")
 
-    y_data = Tc_full[:st.session_state.idx+1]
-    t_data = t_full[:st.session_state.idx+1]
-
-    line.set_data(t_data, y_data)
     ax.set_xlim(0, duration)
-    plot_placeholder.pyplot(fig)
+    ax.set_ylim(0, 20)
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Temperature [°C]")
+    ax.grid(True)
 
-    # Time & PWM
-    elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_data[-1])} s")
-    pwm_placeholder.markdown(f"**PWM:** {pwm_full[st.session_state.idx]:.1f}")
-    pwm_bar.progress(int(pwm_full[st.session_state.idx]/255*100))
-
-    # Metrics
-    error = np.array(y_data) - T_set
-    ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
-    rmse = np.sqrt(np.mean(error**2))
-    overshoot = max(error) if len(error) > 0 else 0
-    settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
-
-    recs = []
-    if mode != "Hysteresis":
-        if ss_error > 0.5: recs.append("Decrease Kp to reduce steady-state error.")
-        if ss_error < -0.5: recs.append("Increase Kp to reduce steady-state error.")
-        if settling_time is None or settling_time > 150: recs.append("Increase Kp or Ki for faster settling.")
-
-    metrics_placeholder.markdown(
-        f"**Steady-state error:** {ss_error:.2f} °C  \n"
-        f"**RMSE:** {rmse:.2f}  \n"
-        f"**Overshoot:** {overshoot:.2f} °C  \n"
-        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-        + ("\n".join(f"- {r}" for r in recs))
-    )
-
-if st.session_state.dynamic_mode:
-    update_dynamic()
-    st.experimental_rerun()  # auto-refresh while running
+    st.pyplot(fig)
 
 # -------------------------------
-# Static mode: full simulation
+# DYNAMIC
 # -------------------------------
-if st.session_state.static_mode:
-    line.set_data(t_full, Tc_full)
+else:
+
+    step = 1
+
+    if st.session_state.running:
+        st.session_state.idx = min(
+            st.session_state.idx + step,
+            len(t_full) - 1
+        )
+
+    i = max(1, st.session_state.idx)
+
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    ax.plot(t_full[:i], Tc_full[:i], lw=1.5)
+    ax.axhline(T_set, linestyle="--")
+
     ax.set_xlim(0, duration)
-    plot_placeholder.pyplot(fig)
+    ax.set_ylim(0, 20)
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Temperature [°C]")
+    ax.grid(True)
 
-    elapsed_placeholder.markdown(f"**Time elapsed:** {int(duration)} s")
-    pwm_placeholder.markdown(f"**PWM:** {np.max(pwm_full):.1f}")
-    pwm_bar.progress(int(np.max(pwm_full)/255*100))
+    st.pyplot(fig)
 
-    error = Tc_full - T_set
-    ss_error = np.mean(error[-50:])
-    rmse = np.sqrt(np.mean(error**2))
-    overshoot = np.max(error)
-    settling_time = next((t_full[j] for j in range(len(error)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+    # Time + PWM
+    st.markdown(f"**Time:** {t_full[i]:.1f} s")
+    st.markdown(f"**PWM:** {pwm_full[i]:.1f}")
+    st.progress(int(pwm_full[i] / 255 * 100))
 
-    recs = []
-    if mode != "Hysteresis":
-        if ss_error > 0.5: recs.append("Decrease Kp to reduce steady-state error.")
-        if ss_error < -0.5: recs.append("Increase Kp to reduce steady-state error.")
-        if settling_time is None or settling_time > 150: recs.append("Increase Kp or Ki for faster settling.")
+    if st.session_state.running:
+        time.sleep(0.05)
+        st.rerun()
 
-    metrics_placeholder.markdown(
-        f"**Steady-state error:** {ss_error:.2f} °C  \n"
-        f"**RMSE:** {rmse:.2f}  \n"
-        f"**Overshoot:** {overshoot:.2f} °C  \n"
-        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-        + ("\n".join(f"- {r}" for r in recs))
-    )
+# -------------------------------
+# Metrics (CORRECTED)
+# -------------------------------
+error = Tc_full - T_set
+
+ss_error = np.mean(error[-50:])
+rmse = np.sqrt(np.mean(error**2))
+
+# ✅ Overshoot CORRECTO
+overshoot = 0.0
+cross_idx = None
+
+for k in range(len(Tc_full)):
+    if Tc_full[k] <= T_set:
+        cross_idx = k
+        break
+
+if cross_idx is not None:
+    post = Tc_full[cross_idx:]
+    if len(post) > 0:
+        overshoot = max(0.0, np.max(post) - T_set)
+
+# Settling time
+settling_time = None
+for j in range(len(Tc_full)):
+    if np.all(np.abs(error[j:]) <= 0.5):
+        settling_time = t_full[j]
+        break
+
+# -------------------------------
+# Metrics display
+# -------------------------------
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("SS Error (°C)", f"{ss_error:.2f}")
+col2.metric("RMSE", f"{rmse:.2f}")
+col3.metric("Overshoot (°C)", f"{overshoot:.2f}")
+col4.metric("Settling Time (s)", f"{settling_time if settling_time else '—'}")
+
+# -------------------------------
+# Recommendations
+# -------------------------------
+recs = []
+
+if mode in ["PID", "FOPID"]:
+    if abs(ss_error) > 0.5:
+        recs.append("Increase Ki")
+
+    if overshoot > 1.0:
+        recs.append("Reduce Kp or increase Kd")
+
+    if settling_time is None or settling_time > 150:
+        recs.append("Increase Kp")
+
+    if rmse > 1.0:
+        recs.append("Tune gains globally")
+
+else:
+    if overshoot > 1.0:
+        recs.append("Reduce hysteresis band")
+
+    if settling_time is None:
+        recs.append("Increase hysteresis band")
+
+    if rmse > 1.0:
+        recs.append("Adjust thresholds")
+
+if recs:
+    st.markdown("### 🧠 Recommendations")
+    for r in recs:
+        st.markdown(f"- {r}")
