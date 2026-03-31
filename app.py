@@ -10,7 +10,10 @@ from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 # -------------------------------
 # Page config
 # -------------------------------
-st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
+st.set_page_config(
+    page_title="PeltierLab Simulator",
+    layout="wide"
+)
 
 # -------------------------------
 # Global parameters
@@ -28,14 +31,42 @@ mu_default = 1.47
 # Title
 # -------------------------------
 st.title("❄️ PeltierLab Interactive Simulator")
-st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
+st.markdown(
+    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
+)
 
 # -------------------------------
-# Sidebar (controls)
+# SIDEBAR (controls)
 # -------------------------------
 st.sidebar.header("Settings")
+
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+
+# -------------------------------
+# Static / Dynamic toggle (mutually exclusive)
+# -------------------------------
+mode_run = st.sidebar.selectbox("Simulation Mode", ["Static", "Dynamic"], index=1)
+
+# En Dynamic, habilitamos el start/stop; en Static, se desactiva
+if mode_run == "Static":
+    st.session_state['running_state'] = False
+    start_stop_disabled = True
+else:
+    start_stop_disabled = False
+
+# Simulation duration and start/stop
+if start_stop_disabled:
+    st.sidebar.button("Start/Stop (Disabled in Static Mode)", disabled=True)
+else:
+    if st.sidebar.button("Start/Stop"):
+        if 'running_state' not in st.session_state:
+            st.session_state['running_state'] = False
+        st.session_state['running_state'] = not st.session_state['running_state']
+
+# Elapsed time placeholder
+elapsed_placeholder = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
 
 # -------------------------------
 # Compact sliders
@@ -47,21 +78,22 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
         Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
+
     elif mode == "Hysteresis":
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Initialize simulation
+# Prepare simulation data
 # -------------------------------
-t_full = np.linspace(0, duration, duration + 1)
-
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
+    t_full = np.linspace(0, duration, duration + 1)
     if mode == "PID":
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
             t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
@@ -74,6 +106,7 @@ if mode in ["PID", "FOPID"]:
         )
 elif mode == "Hysteresis":
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
+    t_full = np.linspace(0, duration, duration + 1)
     Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
         t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
     )
@@ -94,25 +127,21 @@ ax.grid(True, lw=0.5)
 ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
-# Metrics & info
+# -------------------------------
+# Metrics & recommendations
+# -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
-metrics_text = info_expander.empty()
-elapsed_placeholder = st.sidebar.empty()
-pwm_placeholder = st.sidebar.empty()
-pwm_bar = st.sidebar.empty()
+with info_expander:
+    metrics_text = st.empty()
 
 # -------------------------------
-# Start/Stop toggle
+# Simulation loop (4 FPS)
 # -------------------------------
+running = False
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
+st.session_state['running_state'] = st.session_state.get('running_state', False)
 
-if st.sidebar.button("Start/Stop"):
-    st.session_state['running_state'] = not st.session_state['running_state']
-
-# -------------------------------
-# Simulation loop
-# -------------------------------
 if st.session_state['running_state']:
     y_data = []
     t_data = []
@@ -129,35 +158,30 @@ if st.session_state['running_state']:
         y_data.append(Tc_full[i])
         t_data.append(t_full[i])
 
-        # Update plot
+        # Update line
         line.set_data(t_data, y_data)
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
-        # Update side info
+        # Update time elapsed
         elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+
+        # Update PWM
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # Metrics
-        error = T_set - np.array(y_data)
-        Tmin = np.min(np.array(y_data))
-        undershoot = max(0.0, T_set - Tmin)
-
+        # Update metrics
+        error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
         settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
 
         recs = []
-        if undershoot > 0.5:
-            recs.append(f"Undershoot detected: {undershoot:.2f} °C")
         if abs(ss_error) > 0.5:
             recs.append("Consider tuning controller to reduce steady-state error.")
         if settling_time is None or settling_time > 150:
             recs.append("Slow response → consider increasing gains for faster settling.")
-
         metrics_text.markdown(
-            f"**Undershoot:** {undershoot:.3f} °C  \n"
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
