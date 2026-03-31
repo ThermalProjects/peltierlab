@@ -21,14 +21,14 @@ st.set_page_config(
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
 T_start = 19.0
 
-Kp_default = 58.93
-Ki_default = 3.91
-Kd_default = 2.66
-lambda_default = 0.67
-mu_default = 1.47
-
-# Reference optimal FOPID (PSO) values
-FOPID_optimal = {"Kp": 58.93, "Ki": 3.91, "Kd": 2.66, "λ": 0.67, "μ": 1.47}
+# Default PID/FOPID values (from PSO reference)
+FOPID_optimal = {
+    "Kp": 58.93,
+    "Ki": 3.91,
+    "Kd": 2.66,
+    "λ": 0.67,
+    "μ": 1.47
+}
 
 # -------------------------------
 # Title
@@ -45,28 +45,30 @@ st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
-# Simulation duration
+# Simulation duration and start/stop
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 start_stop = st.sidebar.button("Start/Stop")
 
-# Placeholders
+# Elapsed time placeholder
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
 pwm_bar = st.sidebar.empty()
 
 # -------------------------------
-# Control parameters
+# Compact sliders
 # -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
         T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
         bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-        Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
-        Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
-        Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+        Kp = st.slider("Kp", 0, 200, int(FOPID_optimal["Kp"]), 1)
+        Ki = st.slider("Ki", 0.0, 50.0, FOPID_optimal["Ki"], 0.1)
+        Kd = st.slider("Kd", 0.0, 50.0, FOPID_optimal["Kd"], 0.1)
+
         if mode == "FOPID":
-            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
-            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
+            lam = st.slider("Lambda (λ)", 0.1, 2.0, FOPID_optimal["λ"], 0.01)
+            mu = st.slider("Mu (μ)", 0.1, 2.0, FOPID_optimal["μ"], 0.01)
+
     elif mode == "Hysteresis":
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
@@ -81,7 +83,7 @@ if mode in ["PID", "FOPID"]:
     if mode == "PID":
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
             t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lambda_default, mu=mu_default
+            bias=bias, lam=FOPID_optimal["λ"], mu=FOPID_optimal["μ"]
         )
     else:
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
@@ -119,29 +121,27 @@ with info_expander:
     metrics_text = st.empty()
 
 # -------------------------------
-# Simulation state handling
+# Simulation state management
 # -------------------------------
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
 
-# Toggle running state on button press
+# Toggle on button click
 if start_stop:
     st.session_state['running_state'] = not st.session_state['running_state']
+
+running = st.session_state['running_state']
 
 # -------------------------------
 # Simulation loop (4 FPS)
 # -------------------------------
-if st.session_state['running_state']:
+if running:
     y_data = []
     t_data = []
     fps = 4
     start_time = time.time()
 
     for i in range(len(t_full)):
-        # Stop check
-        if not st.session_state['running_state']:
-            break
-
         current_time = time.time()
         elapsed_real = current_time - start_time
         if elapsed_real < t_full[i]:
@@ -162,32 +162,31 @@ if st.session_state['running_state']:
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # Compute metrics
+        # Update metrics
         error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
-        settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+        settling_time = next(
+            (t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)),
+            None
+        )
 
-        # Recommendations
         recs = []
         if abs(ss_error) > 0.5:
             recs.append("Consider tuning controller to reduce steady-state error.")
         if settling_time is None or settling_time > 150:
             recs.append("Slow response → consider increasing gains for faster settling.")
 
-        # Tuning info by mode
-        tuning_info = ""
+        # -------------------------------
+        # Tuning reference info
+        # -------------------------------
         if mode == "PID":
             tuning_info = (
-                f"**Controller parameters:**  \n"
-                f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}\n"
                 f"Reference optimal PID (PSO):  \n"
                 f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, Kd = {FOPID_optimal['Kd']}"
             )
         elif mode == "FOPID":
             tuning_info = (
-                f"**Controller parameters:**  \n"
-                f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}, λ = {lam:.2f}, μ = {mu:.2f}\n"
                 f"Reference optimal FOPID (PSO):  \n"
                 f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
                 f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
@@ -195,11 +194,10 @@ if st.session_state['running_state']:
         elif mode == "Hysteresis":
             tuning_info = f"**Hysteresis bands:** dT1 = {dT1}, dT2 = {dT2}"
 
-        # Display metrics + tuning info
         metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-            + ("\n".join(f"- {r}" for r in recs)) + "\n\n" +
-            tuning_info
+            + ("\n".join(f"- {r}" for r in recs))
+            + "\n\n" + tuning_info
         )
