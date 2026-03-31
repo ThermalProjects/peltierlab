@@ -27,7 +27,7 @@ Kd_default = 2.66
 lambda_default = 0.67
 mu_default = 1.47
 
-# Optimal FOPID reference (PSO)
+# Reference optimal FOPID (PSO) values
 FOPID_optimal = {"Kp": 58.93, "Ki": 3.91, "Kd": 2.66, "λ": 0.67, "μ": 1.47}
 
 # -------------------------------
@@ -42,22 +42,20 @@ st.markdown(
 # SIDEBAR (controls)
 # -------------------------------
 st.sidebar.header("Settings")
+
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+
+# Simulation duration
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-
-if 'running_state' not in st.session_state:
-    st.session_state['running_state'] = False
-
 start_stop = st.sidebar.button("Start/Stop")
-if start_stop:
-    st.session_state['running_state'] = not st.session_state['running_state']
 
+# Placeholders
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
 pwm_bar = st.sidebar.empty()
 
 # -------------------------------
-# Compact sliders
+# Control parameters
 # -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
@@ -114,11 +112,21 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics & recommendations with tuning info
+# Metrics & recommendations
 # -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
 with info_expander:
     metrics_text = st.empty()
+
+# -------------------------------
+# Simulation state handling
+# -------------------------------
+if 'running_state' not in st.session_state:
+    st.session_state['running_state'] = False
+
+# Toggle running state on button press
+if start_stop:
+    st.session_state['running_state'] = not st.session_state['running_state']
 
 # -------------------------------
 # Simulation loop (4 FPS)
@@ -127,12 +135,12 @@ if st.session_state['running_state']:
     y_data = []
     t_data = []
     fps = 4
-    interval = 1.0 / fps
     start_time = time.time()
 
     for i in range(len(t_full)):
+        # Stop check
         if not st.session_state['running_state']:
-            break  # Stop the loop if button pressed again
+            break
 
         current_time = time.time()
         elapsed_real = current_time - start_time
@@ -154,45 +162,44 @@ if st.session_state['running_state']:
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # Update metrics
+        # Compute metrics
         error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
         settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
-        overshoot = np.max(y_data) - T_set
-        final_amp = np.max(y_data[-50:]) - np.min(y_data[-50:]) if len(y_data) >= 50 else np.max(y_data) - np.min(y_data)
 
+        # Recommendations
         recs = []
         if abs(ss_error) > 0.5:
             recs.append("Consider tuning controller to reduce steady-state error.")
         if settling_time is None or settling_time > 150:
             recs.append("Slow response → consider increasing gains for faster settling.")
-        if overshoot > 2:
-            recs.append("Large overshoot → consider reducing Kp or adjusting λ/μ for FOPID.")
-        if final_amp > 1.0:
-            recs.append("Significant oscillations in steady-state → tune λ/μ (FOPID) or bands dT1/dT2 (Hysteresis).")
+
+        # Tuning info by mode
+        tuning_info = ""
+        if mode == "PID":
+            tuning_info = (
+                f"**Controller parameters:**  \n"
+                f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}\n"
+                f"Reference optimal PID (PSO):  \n"
+                f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, Kd = {FOPID_optimal['Kd']}"
+            )
+        elif mode == "FOPID":
+            tuning_info = (
+                f"**Controller parameters:**  \n"
+                f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}, λ = {lam:.2f}, μ = {mu:.2f}\n"
+                f"Reference optimal FOPID (PSO):  \n"
+                f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
+                f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
+            )
+        elif mode == "Hysteresis":
+            tuning_info = f"**Hysteresis bands:** dT1 = {dT1}, dT2 = {dT2}"
 
         # Display metrics + tuning info
-# Display metrics + tuning info
-tuning_info = ""
-if mode in ["PID", "FOPID"]:
-    tuning_info = (
-        f"**Controller parameters:**  \n"
-        f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}" +
-        (f", λ = {lam:.2f}, μ = {mu:.2f}" if mode=="FOPID" else "") +
-        f"\nReference optimal FOPID (PSO):  \n"
-        f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
-        f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
-    )
-elif mode=="Hysteresis":
-    tuning_info = f"**Hysteresis bands:** dT1 = {dT1}, dT2 = {dT2}"
-
         metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-            f"**Overshoot:** {overshoot:.3f} °C  \n"
-            f"**Steady-state amplitude:** {final_amp:.3f} °C  \n\n"
-            f"{tuning_info}\n\n" +
-            ("\n".join(f"- {r}" for r in recs))
+            + ("\n".join(f"- {r}" for r in recs)) + "\n\n" +
+            tuning_info
         )
