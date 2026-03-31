@@ -16,12 +16,6 @@ st.set_page_config(
 )
 
 # -------------------------------
-# Sidebar title
-# -------------------------------
-st.sidebar.title("❄️ PeltierLab Interactive Simulator")
-st.sidebar.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
-
-# -------------------------------
 # Global parameters
 # -------------------------------
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
@@ -34,19 +28,28 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Sidebar controls
+# Title in sidebar
+# -------------------------------
+st.sidebar.title("❄️ PeltierLab Interactive Simulator")
+st.sidebar.markdown(
+    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
+)
+
+# -------------------------------
+# SIDEBAR (controls)
 # -------------------------------
 st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-# Start/Stop horizontal layout
-col1, col2, col3, col4 = st.sidebar.columns([1,1,1,1])
-start_btn = col1.button("Start")
-stop_btn = col2.button("Stop")
-time_placeholder = col3.empty()
-pwm_placeholder = col4.empty()
+# Simulation duration and start/stop
+duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+start_stop = st.sidebar.button("Start/Stop")
+
+# Elapsed time placeholder
+elapsed_placeholder = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
 
 # -------------------------------
 # Compact sliders
@@ -69,25 +72,11 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Session state for running
-# -------------------------------
-if 'running_state' not in st.session_state:
-    st.session_state['running_state'] = False
-
-if start_btn:
-    st.session_state['running_state'] = True
-if stop_btn:
-    st.session_state['running_state'] = False
-
-running = st.session_state['running_state']
-
-# -------------------------------
 # Prepare simulation data
 # -------------------------------
-t_full = np.linspace(0, duration, duration + 1)
-
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
+    t_full = np.linspace(0, duration, duration + 1)
     if mode == "PID":
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
             t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
@@ -100,6 +89,7 @@ if mode in ["PID", "FOPID"]:
         )
 elif mode == "Hysteresis":
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
+    t_full = np.linspace(0, duration, duration + 1)
     Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
         t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
     )
@@ -121,25 +111,31 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics & recommendations placeholders
+# Metrics & recommendations
 # -------------------------------
-metrics_expander = st.expander("Metrics & Recommendations", expanded=True)
-metrics_placeholder = metrics_expander.empty()
+info_expander = st.expander("Model Information & Metrics", expanded=True)
+with info_expander:
+    metrics_text = st.empty()
 
 # -------------------------------
 # Simulation loop (4 FPS)
 # -------------------------------
-fps = 4
-interval = 1.0 / fps
-y_data = []
-t_data = []
+running = False
+if start_stop:
+    running = not running
 
-if running:
+if 'running_state' not in st.session_state:
+    st.session_state['running_state'] = False
+st.session_state['running_state'] = running
+
+if st.session_state['running_state']:
+    y_data = []
+    t_data = []
+    fps = 4
+    interval = 1.0 / fps
     start_time = time.time()
-    for i in range(len(t_full)):
-        if not st.session_state['running_state']:
-            break
 
+    for i in range(len(t_full)):
         current_time = time.time()
         elapsed_real = current_time - start_time
         if elapsed_real < t_full[i]:
@@ -153,9 +149,12 @@ if running:
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
-        # Update time and PWM
-        time_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+        # Update time elapsed
+        elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+
+        # Update PWM
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
+        pwm_bar.progress(int(pwm_full[i]/255*100))
 
         # Update metrics
         error = np.array(y_data) - T_set
@@ -163,19 +162,20 @@ if running:
         rmse = np.sqrt(np.mean(error**2))
         settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
 
-        # Correct overshoot calculation
-        overshoot = max(y_data) - T_set if len(y_data) > 0 else 0.0
+        # -------------------------------
+        # OVERSHOOT corregido
+        overshoot = '-' if len(y_data) < 5 else max(y_data) - T_set
 
         recs = []
-        if mode != "Hysteresis":
-            if abs(ss_error) > 0.5:
-                recs.append("Consider tuning controller to reduce steady-state error.")
-            if settling_time is None or settling_time > 150:
-                recs.append("Slow response → consider increasing gains for faster settling.")
-        metrics_placeholder.markdown(
+        if abs(ss_error) > 0.5:
+            recs.append("Consider tuning controller to reduce steady-state error.")
+        if settling_time is None or settling_time > 150:
+            recs.append("Slow response → consider increasing gains for faster settling.")
+
+        metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
-            f"**Overshoot:** {overshoot:.3f} °C  \n"
+            f"**Overshoot:** {overshoot if overshoot=='-' else f'{overshoot:.3f}'} °C  \n"
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
             + ("\n".join(f"- {r}" for r in recs))
         )
