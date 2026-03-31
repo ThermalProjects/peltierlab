@@ -163,11 +163,6 @@ else:
 
     st.pyplot(fig)
 
-    # Time + PWM
-    st.markdown(f"**Time:** {t_full[i]:.1f} s")
-    st.markdown(f"**PWM:** {pwm_full[i]:.1f}")
-    st.progress(int(pwm_full[i] / 255 * 100))
-
     if st.session_state.running:
         time.sleep(0.05)
         st.rerun()
@@ -180,7 +175,6 @@ error = Tc_full - T_set
 ss_error = np.mean(error[-50:])
 rmse = np.sqrt(np.mean(error**2))
 
-# ✅ Overshoot CORRECTO
 overshoot = 0.0
 cross_idx = None
 
@@ -194,7 +188,6 @@ if cross_idx is not None:
     if len(post) > 0:
         overshoot = max(0.0, np.max(post) - T_set)
 
-# Settling time
 settling_time = None
 for j in range(len(Tc_full)):
     if np.all(np.abs(error[j:]) <= 0.5):
@@ -202,13 +195,20 @@ for j in range(len(Tc_full)):
         break
 
 # -------------------------------
-# Metrics display
+# Sidebar metrics
 # -------------------------------
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("SS Error (°C)", f"{ss_error:.2f}")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Metrics & Status")
+
+st.sidebar.markdown(f"**Time:** {t_full[i]:.1f} s")
+st.sidebar.markdown(f"**PWM:** {pwm_full[i]:.1f}")
+st.sidebar.progress(int(pwm_full[i] / 255 * 100))
+
+col1, col2, col3, col4 = st.sidebar.columns(4)
+col1.metric("SS Error", f"{ss_error:.2f} °C")
 col2.metric("RMSE", f"{rmse:.2f}")
-col3.metric("Overshoot (°C)", f"{overshoot:.2f}")
-col4.metric("Settling Time (s)", f"{settling_time if settling_time else '—'}")
+col3.metric("Overshoot", f"{overshoot:.2f} °C")
+col4.metric("Settling Time", f"{settling_time if settling_time else '—'} s")
 
 # -------------------------------
 # Recommendations
@@ -239,6 +239,6 @@ else:
         recs.append("Adjust thresholds")
 
 if recs:
-    st.markdown("### 🧠 Recommendations")
+    st.sidebar.markdown("### 🧠 Recommendations")
     for r in recs:
-        st.markdown(f"- {r}")
+        st.sidebar.markdown(f"- {r}")
