@@ -2,13 +2,18 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import time
+
 from peltierlab.core.simulator import Simulator
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 
 # -------------------------------
 # Page config
 # -------------------------------
-st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
+st.set_page_config(
+    page_title="PeltierLab Simulator",
+    layout="wide"
+)
 
 # -------------------------------
 # Global parameters
@@ -26,22 +31,18 @@ mu_default = 1.47
 # Title
 # -------------------------------
 st.title("❄️ PeltierLab Interactive Simulator")
-st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
+st.markdown(
+    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
+)
 
 # -------------------------------
-# Sidebar controls
+# SIDEBAR (controls)
 # -------------------------------
 st.sidebar.header("Settings")
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-col1, col2 = st.sidebar.columns(2)
-start_pause = col1.button("Start / Pause")
-stop_button = col2.button("Stop")
-
-# -------------------------------
-# Control sliders
-# -------------------------------
+# Control Parameters
 with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
         T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
@@ -58,80 +59,123 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Initialize session state
+# Session state initialization
 # -------------------------------
-if 'sim_state' not in st.session_state or stop_button:
-    st.session_state.sim_state = {
-        'running': False,
-        't_index': 0,
-        't_full': np.linspace(0, duration, duration+1),
-        'Tc_full': np.zeros(duration+1),
-        'pwm_full': np.zeros(duration+1)
-    }
-    # Generate simulation arrays
-    t_full = st.session_state.sim_state['t_full']
+if "running_state" not in st.session_state:
+    st.session_state.running_state = False
+if "current_index" not in st.session_state:
+    st.session_state.current_index = 0
+
+# -------------------------------
+# Buttons Start/Pause & Stop in same row
+# -------------------------------
+col1, col2 = st.sidebar.columns([1, 1])
+with col1:
+    start_pause = st.button("▶️ Start/Pause")
+with col2:
+    stop = st.button("⏹ Stop")
+
+# -------------------------------
+# Stop resets simulation
+# -------------------------------
+if stop:
+    st.session_state.running_state = False
+    st.session_state.current_index = 0
+
+# -------------------------------
+# Prepare simulation arrays only once
+# -------------------------------
+if "t_full" not in st.session_state:
+    t_full = np.linspace(0, duration, duration + 1)
     if mode in ["PID", "FOPID"]:
         sim = Simulator(best_params, T_start=T_start)
         if mode == "PID":
             Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-                t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+                t_custom=t_full, T_set=T_set,
+                Kp=Kp, Ki=Ki, Kd=Kd,
                 bias=bias, lam=lambda_default, mu=mu_default
             )
         else:
             Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-                t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+                t_custom=t_full, T_set=T_set,
+                Kp=Kp, Ki=Ki, Kd=Kd,
                 bias=bias, lam=lam, mu=mu
             )
-    else:
+        st.session_state["Tc_full"] = Tc_full
+        st.session_state["pwm_full"] = pwm_full
+    else:  # Hysteresis
         sim = SimulatorHysteresisReal(best_params, T_start=T_start)
         Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
             t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
         )
-
-    st.session_state.sim_state.update({
-        'Tc_full': Tc_full,
-        'pwm_full': pwm_full,
-        't_index': 0,
-        'running': False
-    })
+        st.session_state["Tc_full"] = Tc_full
+        st.session_state["pwm_full"] = pwm_full
+    st.session_state["t_full"] = t_full
 
 # -------------------------------
 # Toggle running state
 # -------------------------------
 if start_pause:
-    st.session_state.sim_state['running'] = not st.session_state.sim_state['running']
-
-sim_state = st.session_state.sim_state
+    st.session_state.running_state = not st.session_state.running_state
 
 # -------------------------------
-# Advance simulation by one step
+# Plot placeholders
 # -------------------------------
-if sim_state['running'] and sim_state['t_index'] < len(sim_state['t_full']):
-    sim_state['t_index'] += 1
-    # Force rerun for animation effect
-    st.experimental_rerun()
-
-# -------------------------------
-# Plot
-# -------------------------------
-t_data = sim_state['t_full'][:sim_state['t_index']]
-y_data = sim_state['Tc_full'][:sim_state['t_index']]
-
-fig, ax = plt.subplots(figsize=(8,4))
-ax.plot(t_data, y_data, color='blue', lw=2, label="Temperature")
-ax.axhline(T_set, color='red', linestyle='--', label="Setpoint")
+st.subheader(f"Results: {mode}")
+fig, ax = plt.subplots(figsize=(10, 4))
+line, = ax.plot([], [], lw=2, color="blue", label="Temperature")
+ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 ax.set_xlim(0, duration)
 ax.set_ylim(0, 20)
 ax.set_xlabel("Time [s]")
 ax.set_ylabel("Temperature [°C]")
-ax.grid(True, lw=0.5)
+ax.grid(True)
 ax.legend()
-st.pyplot(fig)
+plot_placeholder = st.pyplot(fig)
+
+# Metrics placeholders
+elapsed_placeholder = st.empty()
+pwm_placeholder = st.empty()
+pwm_bar = st.empty()
+metrics_text = st.empty()
 
 # -------------------------------
-# Metrics & PWM
+# Simulation loop (non-blocking, step-by-step)
 # -------------------------------
-if len(y_data) > 0:
-    st.sidebar.markdown(f"**Time elapsed:** {int(t_data[-1])} s")
-    st.sidebar.markdown(f"**PWM:** {sim_state['pwm_full'][sim_state['t_index']-1]:.1f}")
-    st.sidebar.progress(int(sim_state['pwm_full'][sim_state['t_index']-1]/255*100))
+if st.session_state.running_state:
+    idx = st.session_state.current_index
+    if idx < len(st.session_state["t_full"]):
+        # Update data up to current index
+        t_data = st.session_state["t_full"][:idx+1]
+        y_data = st.session_state["Tc_full"][:idx+1]
+        pwm_data = st.session_state["pwm_full"][:idx+1]
+
+        line.set_data(t_data, y_data)
+        ax.set_xlim(0, duration)
+        plot_placeholder.pyplot(fig)
+
+        # Update metrics
+        elapsed_placeholder.markdown(f"**Time elapsed:** {t_data[-1]:.0f} s")
+        pwm_placeholder.markdown(f"**PWM:** {pwm_data[-1]:.1f}")
+        pwm_bar.progress(int(pwm_data[-1]/255*100))
+
+        error = np.array(y_data) - T_set
+        ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
+        rmse = np.sqrt(np.mean(error**2))
+        settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+        recs = []
+        if abs(ss_error) > 0.5:
+            recs.append("Consider tuning controller to reduce steady-state error.")
+        if settling_time is None or settling_time > 150:
+            recs.append("Slow response → consider increasing gains.")
+        metrics_text.markdown(
+            f"**Steady-state error:** {ss_error:.3f} °C  \n"
+            f"**RMSE:** {rmse:.3f}  \n"
+            f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
+            + ("\n".join(f"- {r}" for r in recs))
+        )
+
+        # Advance index
+        st.session_state.current_index += 1
+        # Auto-refresh page to animate
+        st.experimental_rerun()
