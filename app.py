@@ -28,31 +28,29 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Sidebar title
+# Sidebar Title
 # -------------------------------
 st.sidebar.title("❄️ PeltierLab Interactive Simulator")
+st.sidebar.markdown(
+    "Thermoelectric system simulation using PID, FOPID, and Hysteresis controls."
+)
 
 # -------------------------------
 # Sidebar controls
 # -------------------------------
-st.sidebar.header("Settings")
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
+
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-sim_type = st.sidebar.radio("Simulation type", ["Dynamic", "Static"], index=0)
 
+# Dynamic / Static side by side
 col1, col2 = st.sidebar.columns(2)
-start_btn = col1.button("Start")
-stop_btn = col2.button("Stop")
+dynamic = col1.radio("Mode", ["Dynamic", "Static"], index=0)
 
-# Placeholders
-elapsed_placeholder = st.sidebar.empty()
-pwm_placeholder = st.sidebar.empty()
-metrics_placeholder = st.sidebar.empty()
-recs_placeholder = st.sidebar.empty()
-plot_placeholder = st.empty()
+start = col2.button("Start")
+stop = col2.button("Stop")
 
 # -------------------------------
-# Control parameters
+# Control sliders
 # -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
@@ -64,19 +62,19 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-    elif mode == "Hysteresis":
+    else:
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Session state init
+# Session state initialization
 # -------------------------------
 if 'running' not in st.session_state:
     st.session_state.running = False
-if 'y_data' not in st.session_state:
+if 'y_data' not in st.session_state or len(st.session_state.y_data)==0:
     st.session_state.y_data = []
-if 't_data' not in st.session_state:
+if 't_data' not in st.session_state or len(st.session_state.t_data)==0:
     st.session_state.t_data = []
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
@@ -84,19 +82,19 @@ if 'idx' not in st.session_state:
 # -------------------------------
 # Start / Stop handling
 # -------------------------------
-if start_btn:
+if start:
     st.session_state.running = True
+    st.session_state.idx = 0
     st.session_state.y_data = []
     st.session_state.t_data = []
-    st.session_state.idx = 0
 
-if stop_btn:
+if stop:
     st.session_state.running = False
 
 # -------------------------------
 # Prepare simulation data
 # -------------------------------
-t_full = np.linspace(0, duration, duration + 1)
+t_full = np.linspace(0, duration, duration+1)
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
     if mode == "PID":
@@ -109,17 +107,25 @@ if mode in ["PID", "FOPID"]:
             t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
             bias=bias, lam=lam, mu=mu
         )
-elif mode == "Hysteresis":
+else:
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
     Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
         t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
     )
 
 # -------------------------------
+# Initialize data for plotting
+# -------------------------------
+if len(st.session_state.y_data) == 0:
+    st.session_state.y_data.append(Tc_full[0])
+    st.session_state.t_data.append(t_full[0])
+    st.session_state.idx = 1
+
+# -------------------------------
 # Plot setup
 # -------------------------------
 fig, ax = plt.subplots(figsize=(8,4))
-line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
+line, = ax.plot(st.session_state.t_data, st.session_state.y_data, lw=1.5, color='blue', label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 ax.set_xlim(0, duration)
 ax.set_ylim(0, 20)
@@ -128,74 +134,60 @@ ax.set_ylabel("Temperature [°C]")
 ax.tick_params(axis='both', labelsize=8)
 ax.grid(True, lw=0.5)
 ax.legend(fontsize=8)
+plot_placeholder = st.pyplot(fig)
+
+# -------------------------------
+# Sidebar metrics
+# -------------------------------
+st.sidebar.markdown("---")
+elapsed_placeholder = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
+
+# -------------------------------
+# Recommendations below sidebar
+# -------------------------------
+info_expander = st.expander("Metrics & Recommendations", expanded=True)
+metrics_text = info_expander.empty()
 
 # -------------------------------
 # Simulation update
 # -------------------------------
-if sim_type == "Dynamic":
-    if st.session_state.running:
-        fps = 4
-        interval = 1.0 / fps
-        while st.session_state.idx < len(t_full) and st.session_state.running:
-            i = st.session_state.idx
-            st.session_state.y_data.append(Tc_full[i])
-            st.session_state.t_data.append(t_full[i])
-            st.session_state.idx += 1
+if st.session_state.running and st.session_state.idx < len(t_full):
+    idx = st.session_state.idx
+    st.session_state.y_data.append(Tc_full[idx])
+    st.session_state.t_data.append(t_full[idx])
 
-            # Update plot
-            line.set_data(st.session_state.t_data, st.session_state.y_data)
-            ax.set_xlim(0, duration)
-            plot_placeholder.pyplot(fig)
-
-            # Sidebar metrics
-            elapsed_placeholder.markdown(f"**Time:** {int(t_full[i])} s")
-            pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
-
-            # Metrics calculation
-            y_arr = np.array(st.session_state.y_data)
-            error = y_arr - T_set
-            ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
-            rmse = np.sqrt(np.mean(error**2))
-            overshoot = max(0, np.max(y_arr) - T_set)
-            settling_time = next((st.session_state.t_data[j] for j in range(len(y_arr))
-                                  if np.all(np.abs(error[j:]) <= 0.5)), None)
-
-            metrics_placeholder.markdown(
-                f"**Steady-state error:** {ss_error:.3f} °C  \n"
-                f"**RMSE:** {rmse:.3f}  \n"
-                f"**Overshoot:** {overshoot:.3f} °C  \n"
-                f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
-            )
-
-            recs = []
-            if mode in ["PID", "FOPID"]:
-                if abs(ss_error) > 0.5: recs.append("Consider tuning controller to reduce steady-state error.")
-                if overshoot > 1.0: recs.append("Consider reducing Kp to lower overshoot.")
-                if settling_time and settling_time > 150: recs.append("Increase Kp or adjust Ki for faster settling.")
-            recs_placeholder.markdown("\n".join(f"- {r}" for r in recs))
-
-            time.sleep(interval)
-
-elif sim_type == "Static":
-    # Show full curve immediately
-    line.set_data(t_full, Tc_full)
+    # Update plot
+    line.set_data(st.session_state.t_data, st.session_state.y_data)
+    ax.set_xlim(0, duration)
     plot_placeholder.pyplot(fig)
 
-    elapsed_placeholder.markdown(f"**Time:** {int(t_full[-1])} s")
-    pwm_placeholder.markdown(f"**PWM max:** {int(np.max(pwm_full))}")
+    # Update sidebar metrics
+    elapsed_placeholder.markdown(f"**Time:** {int(t_full[idx])} s")
+    pwm_placeholder.markdown(f"**PWM:** {pwm_full[idx]:.1f}")
+    pwm_bar.progress(int(pwm_full[idx]/255*100))
 
-    # Metrics calculation
-    error = Tc_full - T_set
-    ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
+    # Metrics
+    error = np.array(st.session_state.y_data) - T_set
+    ss_error = np.mean(error[-50:]) if len(error)>50 else np.mean(error)
     rmse = np.sqrt(np.mean(error**2))
-    overshoot = max(0, np.max(Tc_full) - T_set)
-    settling_time = next((t_full[j] for j in range(len(Tc_full))
-                          if np.all(np.abs(error[j:]) <= 0.5)), None)
-
-    metrics_placeholder.markdown(
-        f"**Steady-state error:** {ss_error:.3f} °C  \n"
-        f"**RMSE:** {rmse:.3f}  \n"
-        f"**Overshoot:** {overshoot:.3f} °C  \n"
-        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s"
+    overshoot = max(st.session_state.y_data) - T_set
+    settling_time = next((t_full[j] for j in range(idx, len(t_full)) if np.all(np.abs(error[j:])<=0.5)), None)
+    recs = []
+    if mode in ["PID","FOPID"]:
+        if ss_error > 0.5:
+            recs.append("Increase Ki to reduce steady-state error")
+        if settling_time is None or settling_time>150:
+            recs.append("Increase Kp for faster settling")
+        if overshoot > 1.0:
+            recs.append("Decrease Kd to reduce overshoot")
+    metrics_text.markdown(
+        f"**Steady-state error:** {ss_error:.2f} °C  \n"
+        f"**RMSE:** {rmse:.2f}  \n"
+        f"**Overshoot:** {overshoot:.2f} °C  \n"
+        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
+        + ("\n".join(f"- {r}" for r in recs))
     )
-    recs_placeholder.markdown("")
+
+    st.session_state.idx += 1
