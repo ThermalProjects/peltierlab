@@ -27,6 +27,9 @@ Kd_default = 2.66
 lambda_default = 0.67
 mu_default = 1.47
 
+# Optimal FOPID reference (PSO)
+FOPID_optimal = {"Kp": 58.93, "Ki": 3.91, "Kd": 2.66, "λ": 0.67, "μ": 1.47}
+
 # -------------------------------
 # Title
 # -------------------------------
@@ -39,14 +42,9 @@ st.markdown(
 # SIDEBAR (controls)
 # -------------------------------
 st.sidebar.header("Settings")
-
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-
-# Simulation duration and start/stop
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 start_stop = st.sidebar.button("Start/Stop")
-
-# Elapsed time placeholder
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
 pwm_bar = st.sidebar.empty()
@@ -61,11 +59,9 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
         Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-
     elif mode == "Hysteresis":
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
@@ -111,7 +107,7 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics & recommendations
+# Metrics & recommendations with tuning info
 # -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
 with info_expander:
@@ -123,7 +119,6 @@ with info_expander:
 running = False
 if start_stop:
     running = not running
-
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
 st.session_state['running_state'] = running
@@ -161,15 +156,39 @@ if st.session_state['running_state']:
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
         settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+        overshoot = np.max(y_data) - T_set
+        final_amp = np.max(y_data[-50:]) - np.min(y_data[-50:]) if len(y_data) >= 50 else np.max(y_data) - np.min(y_data)
 
         recs = []
         if abs(ss_error) > 0.5:
             recs.append("Consider tuning controller to reduce steady-state error.")
         if settling_time is None or settling_time > 150:
             recs.append("Slow response → consider increasing gains for faster settling.")
+        if overshoot > 2:
+            recs.append("Large overshoot → consider reducing Kp or adjusting λ/μ for FOPID.")
+        if final_amp > 1.0:
+            recs.append("Significant oscillations in steady-state → tune λ/μ (FOPID) or bands dT1/dT2 (Hysteresis).")
+
+        # Display metrics + tuning info
+        tuning_info = ""
+        if mode in ["PID", "FOPID"]:
+            tuning_info = (
+                f"**Controller parameters:**  \n"
+                f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}" +
+                (f", λ = {lam:.2f}, μ = {mu:.2f}" if mode=="FOPID" else "") +
+                "\n**Reference optimal FOPID (PSO):**  \n"
+                f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
+                f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
+            )
+        elif mode=="Hysteresis":
+            tuning_info = f"**Hysteresis bands:** dT1 = {dT1}, dT2 = {dT2}"
+
         metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
             f"**RMSE:** {rmse:.3f}  \n"
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-            + ("\n".join(f"- {r}" for r in recs))
+            f"**Overshoot:** {overshoot:.3f} °C  \n"
+            f"**Steady-state amplitude:** {final_amp:.3f} °C  \n\n"
+            f"{tuning_info}\n\n" +
+            ("\n".join(f"- {r}" for r in recs))
         )
