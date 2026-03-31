@@ -41,13 +41,8 @@ mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 # Simulation duration
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-# Buttons
-start_btn = st.sidebar.button("Start")
-pause_btn = st.sidebar.button("Pause")
-stop_btn = st.sidebar.button("Stop")
-
 # -------------------------------
-# Control parameters
+# Controller parameters
 # -------------------------------
 with st.sidebar.expander("Controller Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
@@ -65,7 +60,7 @@ with st.sidebar.expander("Controller Parameters", expanded=True):
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Initialize session state
+# Session state initialization
 # -------------------------------
 if 'sim_state' not in st.session_state:
     st.session_state['sim_state'] = {
@@ -76,8 +71,15 @@ if 'sim_state' not in st.session_state:
         'y_data': [],
         'pwm_data': [],
     }
-
 sim_state = st.session_state['sim_state']
+
+# -------------------------------
+# Buttons in a single row
+# -------------------------------
+cols = st.sidebar.columns(3)
+start_btn = cols[0].button("Start")
+pause_btn = cols[1].button("Pause/Resume")
+stop_btn = cols[2].button("Stop")
 
 # Button actions
 if start_btn:
@@ -89,7 +91,7 @@ if start_btn:
     sim_state['pwm_data'] = []
 
 if pause_btn:
-    sim_state['paused'] = True
+    sim_state['paused'] = not sim_state['paused']  # toggle pause
 
 if stop_btn:
     sim_state['running'] = False
@@ -126,11 +128,8 @@ elif mode == "Hysteresis":
 # Title & plots
 # -------------------------------
 st.title("❄️ PeltierLab Interactive Simulator")
-st.markdown(
-    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
-)
-
 st.subheader(f"Results: {mode}")
+
 fig, ax = plt.subplots(figsize=(7, 3.5))
 line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
@@ -150,13 +149,13 @@ info_expander = st.expander("Model Information & Metrics", expanded=True)
 with info_expander:
     metrics_text = st.empty()
 
-# Reference optimal values display
-if mode == "PID":
-    st.markdown("**Reference optimal PID (PSO):**")
-    st.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}")
-elif mode == "FOPID":
-    st.markdown("**Reference optimal FOPID (PSO):**")
-    st.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}, λ = {lambda_default}, μ = {mu_default}")
+    # Reference optimal display inside metrics
+    if mode == "PID":
+        metrics_text.markdown("**Reference optimal PID (PSO):**")
+        metrics_text.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}")
+    elif mode == "FOPID":
+        metrics_text.markdown("**Reference optimal FOPID (PSO):**")
+        metrics_text.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}, λ = {lambda_default}, μ = {mu_default}")
 
 # -------------------------------
 # Simulation loop
@@ -171,27 +170,30 @@ if sim_state['running']:
     start_time = time.time()
 
     for i in range(sim_state['index'], len(t_full)):
-        if sim_state['paused'] or not sim_state['running']:
-            break  # stop/pause simulation without resetting
+        if not sim_state['running']:
+            break
+        if sim_state['paused']:
+            time.sleep(0.1)
+            continue  # freeze plot and metrics
 
-        # Wait to match simulation time
+        # wait to match simulation time
         current_time = time.time()
         elapsed_real = current_time - start_time
         if elapsed_real < t_full[i]:
             time.sleep(t_full[i] - elapsed_real)
 
-        # Append data
+        # append data
         y_data.append(Tc_full[i])
         t_data.append(t_full[i])
         pwm_data.append(pwm_full[i])
         sim_state['index'] += 1
 
-        # Update line
+        # update line
         line.set_data(t_data, y_data)
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
-        # Update metrics
+        # update sidebar info (compact)
         elapsed_placeholder = st.sidebar.empty()
         pwm_placeholder = st.sidebar.empty()
         pwm_bar = st.sidebar.empty()
@@ -199,16 +201,16 @@ if sim_state['running']:
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # Compute error metrics
+        # compute error metrics
         error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
         settling_time = next((t_data[j] for j in range(len(y_data))
                               if np.all(np.abs(error[j:]) <= 0.5)), None)
 
-        # Recommendations based on parameters
+        # recommendations
         recs = []
-        if mode == "PID" or mode == "FOPID":
+        if mode in ["PID", "FOPID"]:
             if Kp < Kp_default:
                 recs.append("Kp low → slower response, larger overshoot.")
             else:
