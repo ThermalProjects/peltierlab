@@ -30,7 +30,8 @@ mu_default = 1.47
 # -------------------------------
 # Title
 # -------------------------------
-st.title("❄️ PeltierLab Interactive Simulator")
+st.sidebar.markdown("## ❄️ PeltierLab Simulator")
+st.sidebar.markdown("---")
 
 # -------------------------------
 # Sidebar
