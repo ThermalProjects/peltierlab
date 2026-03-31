@@ -16,11 +16,10 @@ st.set_page_config(
 )
 
 # -------------------------------
-# Global default parameters
+# Default parameters
 # -------------------------------
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
 
-# PID / FOPID defaults
 Kp_default = 58.93
 Ki_default = 3.91
 Kd_default = 2.66
@@ -28,61 +27,18 @@ lambda_default = 0.67
 mu_default = 1.47
 
 # -------------------------------
-# Session state initialization
-# -------------------------------
-if 'sim_state' not in st.session_state:
-    st.session_state['sim_state'] = {
-        'running': False,
-        'paused': False,
-        'index': 0,
-        't_data': [],
-        'y_data': [],
-        'pwm_data': [],
-    }
-sim_state = st.session_state['sim_state']
-
-# -------------------------------
-# Top controls: Start / Pause / Stop
-# -------------------------------
-cols = st.columns(3)
-start_btn = cols[0].button("Start")
-pause_btn = cols[1].button("Pause")
-stop_btn = cols[2].button("Stop")
-
-# Button actions
-if start_btn:
-    sim_state['running'] = True
-    sim_state['paused'] = False
-    sim_state['index'] = 0
-    sim_state['t_data'] = []
-    sim_state['y_data'] = []
-    sim_state['pwm_data'] = []
-
-if pause_btn:
-    if sim_state['running']:
-        sim_state['paused'] = True  # freeze simulation
-
-if stop_btn:
-    sim_state['running'] = False
-    sim_state['paused'] = False
-    sim_state['index'] = 0
-    sim_state['t_data'] = []
-    sim_state['y_data'] = []
-    sim_state['pwm_data'] = []
-
-# -------------------------------
 # Sidebar controls
 # -------------------------------
-st.sidebar.header("Simulation Settings")
-
-# Ambient temperature
-T_start = st.sidebar.slider("Ambient temperature [°C]", 15.0, 25.0, 19.0, 0.1)
+st.sidebar.header("Settings")
 
 # Control mode
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
 # Simulation duration
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+
+# Ambient temperature
+T_start = st.sidebar.slider("Ambient temperature [°C]", 15.0, 25.0, 19.0, 0.1)
 
 # Controller parameters
 with st.sidebar.expander("Controller Parameters", expanded=True):
@@ -95,18 +51,54 @@ with st.sidebar.expander("Controller Parameters", expanded=True):
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-    elif mode == "Hysteresis":
+    else:
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
+# Start / Pause / Stop buttons
+cols = st.sidebar.columns(3)
+start_btn = cols[0].button("Start")
+pause_btn = cols[1].button("Pause")
+stop_btn = cols[2].button("Stop")
+
+# -------------------------------
+# Session state for simulation
+# -------------------------------
+if 'sim_state' not in st.session_state:
+    st.session_state['sim_state'] = {
+        'running': False,
+        'paused': False,
+        'index': 0,
+        't_data': [],
+        'y_data': [],
+        'pwm_data': [],
+    }
+
+sim_state = st.session_state['sim_state']
+
+# Button logic
+if start_btn:
+    sim_state['running'] = True
+    sim_state['paused'] = False
+
+if pause_btn and sim_state['running']:
+    sim_state['paused'] = True
+
+if stop_btn:
+    sim_state['running'] = False
+    sim_state['paused'] = False
+    sim_state['index'] = 0
+    sim_state['t_data'] = []
+    sim_state['y_data'] = []
+    sim_state['pwm_data'] = []
+
 # -------------------------------
 # Prepare simulation
 # -------------------------------
-t_full = np.linspace(0, duration, duration + 1)
-
 if mode in ["PID", "FOPID"]:
     sim = Simulator(best_params, T_start=T_start)
+    t_full = np.linspace(0, duration, duration + 1)
     if mode == "PID":
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
             t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
@@ -117,18 +109,17 @@ if mode in ["PID", "FOPID"]:
             t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
             bias=bias, lam=lam, mu=mu
         )
-elif mode == "Hysteresis":
+else:
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
+    t_full = np.linspace(0, duration, duration + 1)
     Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
         t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
     )
 
 # -------------------------------
-# Title & plots
+# Plot
 # -------------------------------
-st.title("❄️ PeltierLab Interactive Simulator")
 st.subheader(f"Results: {mode}")
-
 fig, ax = plt.subplots(figsize=(7, 3.5))
 line, = ax.plot([], [], lw=1.5, color='blue', label="Temperature")
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
@@ -142,99 +133,101 @@ ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
 # -------------------------------
-# Metrics & Reference PSO inside expander
+# Metrics & recommendations
 # -------------------------------
 info_expander = st.expander("Model Information & Metrics", expanded=True)
 with info_expander:
     metrics_text = st.empty()
-    if mode == "PID":
-        metrics_text.markdown("**Reference optimal PID (PSO):**")
-        metrics_text.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}")
-    elif mode == "FOPID":
-        metrics_text.markdown("**Reference optimal FOPID (PSO):**")
-        metrics_text.markdown(f"Kp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}, λ = {lambda_default}, μ = {mu_default}")
+    ref_text = st.empty()
+
+# -------------------------------
+# Time & PWM placeholders
+# -------------------------------
+elapsed_placeholder = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
 
 # -------------------------------
 # Simulation loop
 # -------------------------------
-if sim_state['running']:
-    y_data = sim_state['y_data']
-    t_data = sim_state['t_data']
-    pwm_data = sim_state['pwm_data']
+fps = 4
+interval = 1.0 / fps
+start_time = time.time()
 
-    fps = 4
-    interval = 1.0 / fps
-    start_time = time.time()
+for i in range(sim_state['index'], len(t_full)):
+    if not sim_state['running']:
+        break
+    if sim_state['paused']:
+        time.sleep(0.1)
+        # freeze plot
+        elapsed_placeholder.markdown(f"**Time elapsed:** {int(sim_state['t_data'][-1]) if sim_state['t_data'] else 0} s")
+        pwm_placeholder.markdown(f"**PWM:** {sim_state['pwm_data'][-1] if sim_state['pwm_data'] else 0:.1f}")
+        continue
 
-    # placeholders for compact display
-    elapsed_placeholder = st.sidebar.empty()
-    pwm_placeholder = st.sidebar.empty()
-    pwm_bar = st.sidebar.empty()
+    # add data
+    sim_state['t_data'].append(t_full[i])
+    sim_state['y_data'].append(Tc_full[i])
+    sim_state['pwm_data'].append(pwm_full[i])
+    sim_state['index'] += 1
 
-    for i in range(sim_state['index'], len(t_full)):
-        if not sim_state['running']:
-            break
-        if sim_state['paused']:
-            time.sleep(0.1)
-            continue  # freeze plot and metrics
+    # update plot
+    line.set_data(sim_state['t_data'], sim_state['y_data'])
+    ax.set_xlim(0, duration)
+    plot_placeholder.pyplot(fig)
 
-        # wait to match simulation time
-        current_time = time.time()
-        elapsed_real = current_time - start_time
-        if elapsed_real < t_full[i]:
-            time.sleep(t_full[i] - elapsed_real)
+    # update sidebar
+    elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+    pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
+    pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # append data
-        y_data.append(Tc_full[i])
-        t_data.append(t_full[i])
-        pwm_data.append(pwm_full[i])
-        sim_state['index'] += 1
+    # -------------------------------
+    # Metrics
+    # -------------------------------
+    error = np.array(sim_state['y_data']) - T_set
+    ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
+    rmse = np.sqrt(np.mean(error**2))
+    settling_time = next((sim_state['t_data'][j] for j in range(len(sim_state['y_data'])) if np.all(np.abs(error[j:]) <= 0.5)), None)
 
-        # update line
-        line.set_data(t_data, y_data)
-        ax.set_xlim(0, duration)
-        plot_placeholder.pyplot(fig)
-
-        # update sidebar info (compact)
-        elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
-        pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
-        pwm_bar.progress(int(pwm_full[i]/255*100))
-
-        # compute error metrics
-        error = np.array(y_data) - T_set
-        ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
-        rmse = np.sqrt(np.mean(error**2))
-        settling_time = next((t_data[j] for j in range(len(y_data))
-                              if np.all(np.abs(error[j:]) <= 0.5)), None)
-
-        # recommendations
-        recs = []
-        if mode in ["PID", "FOPID"]:
-            if Kp < Kp_default:
-                recs.append("Kp low → slower response, larger overshoot.")
+    # Recommendations based on parameters
+    recs = []
+    if mode in ["PID", "FOPID"]:
+        if Kp < Kp_default:
+            recs.append("Increasing Kp → faster response, smaller settling time but may increase overshoot.")
+        else:
+            recs.append("High Kp → may reduce steady-state error but increase oscillations.")
+        if Ki < Ki_default:
+            recs.append("Low Ki → slower elimination of steady-state error.")
+        else:
+            recs.append("High Ki → faster steady-state correction, may induce overshoot.")
+        if Kd < Kd_default:
+            recs.append("Low Kd → less damping, may oscillate more.")
+        else:
+            recs.append("High Kd → more damping, slower response.")
+        if mode == "FOPID":
+            if lam < lambda_default:
+                recs.append("Lambda < default → slower integral action, more error.")
             else:
-                recs.append("Kp high → faster response, smaller settling time but risk of overshoot.")
-            if Ki < Ki_default:
-                recs.append("Ki low → larger steady-state error.")
+                recs.append("Lambda > default → faster integral, may overshoot.")
+            if mu < mu_default:
+                recs.append("Mu < default → slower derivative action.")
             else:
-                recs.append("Ki high → reduces steady-state error, may increase overshoot.")
-            if Kd < Kd_default:
-                recs.append("Kd low → less damping, oscillatory response.")
-            else:
-                recs.append("Kd high → more damping, slower response.")
-            if mode == "FOPID":
-                if lam < lambda_default:
-                    recs.append("λ low → reduces integral action, may increase error.")
-                else:
-                    recs.append("λ high → stronger integral effect, reduces error but can overshoot.")
-                if mu < mu_default:
-                    recs.append("μ low → derivative effect weaker, slower damping.")
-                else:
-                    recs.append("μ high → stronger derivative effect, more damping.")
+                recs.append("Mu > default → faster derivative, may overshoot.")
 
-        metrics_text.markdown(
-            f"**Steady-state error:** {ss_error:.3f} °C  \n"
-            f"**RMSE:** {rmse:.3f}  \n"
-            f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
-            + ("\n".join(f"- {r}" for r in recs))
+    metrics_text.markdown(
+        f"**Steady-state error:** {ss_error:.3f} °C  \n"
+        f"**RMSE:** {rmse:.3f}  \n"
+        f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
+        + ("\n".join(f"- {r}" for r in recs))
+    )
+
+    # -------------------------------
+    # Reference optimal (inside metrics box)
+    # -------------------------------
+    if mode == "PID":
+        ref_text.markdown(
+            f"**Reference optimal PID (PSO):**  \nKp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}"
+        )
+    elif mode == "FOPID":
+        ref_text.markdown(
+            f"**Reference optimal FOPID (PSO):**  \nKp = {Kp_default}, Ki = {Ki_default}, Kd = {Kd_default}, λ = {lambda_default}, μ = {mu_default}"
         )
