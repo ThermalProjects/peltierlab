@@ -41,6 +41,7 @@ st.sidebar.header("Settings")
 sim_type = st.sidebar.radio(
     "Simulation mode",
     ["Dynamic", "Static"]
+        horizontal=True
 )
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
