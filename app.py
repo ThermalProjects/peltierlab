@@ -42,17 +42,16 @@ st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
-# Simulation duration slider
+# Simulation duration and start/stop
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-
-# Static / Dynamic buttons (mutually exclusive)
-static = st.sidebar.checkbox("Static", value=False)
-dynamic = st.sidebar.checkbox("Dynamic", value=False)
-if static and dynamic:
-    st.sidebar.warning("Static and Dynamic are mutually exclusive. Only one can be active.")
-    dynamic = False
-
 start_stop = st.sidebar.button("Start/Stop")
+
+# Static / Dynamic mode (mutually exclusive)
+static = st.sidebar.checkbox("Static")
+dynamic = st.sidebar.checkbox("Dynamic")
+if static and dynamic:
+    st.sidebar.warning("Static and Dynamic are mutually exclusive. Only one will run.")
+    dynamic = False
 
 # Elapsed time placeholder
 elapsed_placeholder = st.sidebar.empty()
@@ -126,7 +125,7 @@ with info_expander:
     metrics_text = st.empty()
 
 # -------------------------------
-# Simulation loop (4 FPS)
+# Simulation loop (Static / Dynamic)
 # -------------------------------
 running = False
 if start_stop:
@@ -143,29 +142,19 @@ if st.session_state['running_state']:
     interval = 1.0 / fps
     start_time = time.time()
 
-    for i in range(len(t_full)):
-        current_time = time.time()
-        elapsed_real = current_time - start_time
-        if elapsed_real < t_full[i]:
-            time.sleep(t_full[i] - elapsed_real)
-
-        # Update data
-        y_data.append(Tc_full[i])
-        t_data.append(t_full[i])
-
-        # Update line
+    if static:
+        # STATIC MODE: mostrar toda la gráfica completa
+        y_data = Tc_full
+        t_data = t_full
         line.set_data(t_data, y_data)
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
-        # Update time elapsed
-        elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
-
         # Update PWM
-        pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
-        pwm_bar.progress(int(pwm_full[i]/255*100))
+        pwm_placeholder.markdown(f"**PWM:** {pwm_full[-1]:.1f}")
+        pwm_bar.progress(int(pwm_full[-1]/255*100))
 
-        # Update metrics
+        # Metrics
         error = np.array(y_data) - T_set
         ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
         rmse = np.sqrt(np.mean(error**2))
@@ -182,3 +171,45 @@ if st.session_state['running_state']:
             f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
             + ("\n".join(f"- {r}" for r in recs))
         )
+
+    elif dynamic:
+        # DYNAMIC MODE: mostrar paso a paso
+        for i in range(len(t_full)):
+            current_time = time.time()
+            elapsed_real = current_time - start_time
+            if elapsed_real < t_full[i]:
+                time.sleep(t_full[i] - elapsed_real)
+
+            # Update data
+            y_data.append(Tc_full[i])
+            t_data.append(t_full[i])
+
+            # Update line
+            line.set_data(t_data, y_data)
+            ax.set_xlim(0, duration)
+            plot_placeholder.pyplot(fig)
+
+            # Update time elapsed
+            elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
+
+            # Update PWM
+            pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
+            pwm_bar.progress(int(pwm_full[i]/255*100))
+
+            # Update metrics
+            error = np.array(y_data) - T_set
+            ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
+            rmse = np.sqrt(np.mean(error**2))
+            settling_time = next((t_data[j] for j in range(len(y_data)) if np.all(np.abs(error[j:]) <= 0.5)), None)
+
+            recs = []
+            if abs(ss_error) > 0.5:
+                recs.append("Consider tuning controller to reduce steady-state error.")
+            if settling_time is None or settling_time > 150:
+                recs.append("Slow response → consider increasing gains for faster settling.")
+            metrics_text.markdown(
+                f"**Steady-state error:** {ss_error:.3f} °C  \n"
+                f"**RMSE:** {rmse:.3f}  \n"
+                f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
+                + ("\n".join(f"- {r}" for r in recs))
+            )
