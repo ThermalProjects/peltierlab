@@ -37,7 +37,7 @@ st.sidebar.header("Simulation Settings")
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-# Start / Stop side by side
+# Buttons Start/Pause and Stop side by side
 col1, col2 = st.sidebar.columns(2)
 start_pause = col1.button("Start/Pause")
 stop_btn = col2.button("Stop")
@@ -57,6 +57,8 @@ if "sim_data" not in st.session_state:
     st.session_state.sim_data = []
 if "pwm_data" not in st.session_state:
     st.session_state.pwm_data = []
+if "t_full" not in st.session_state:
+    st.session_state.t_full = []
 
 # -------------------------------
 # Control sliders
@@ -86,13 +88,14 @@ if stop_btn:
     st.session_state.y_data = []
     st.session_state.sim_data = []
     st.session_state.pwm_data = []
+    st.session_state.t_full = []
 
 # Toggle Start/Pause
 if start_pause:
     st.session_state.running = not st.session_state.running
 
 # -------------------------------
-# Generate simulation data
+# Generate simulation data if empty
 # -------------------------------
 if not st.session_state.sim_data:
     t_full = np.linspace(0, duration, duration + 1)
@@ -127,26 +130,24 @@ pwm_bar = st.sidebar.empty()
 metrics_text = st.sidebar.empty()
 
 # -------------------------------
-# Update simulation step
+# Simulation step increment
 # -------------------------------
 fps = 4
-if st.session_state.running:
-    if st.session_state.current_idx < len(st.session_state.sim_data):
-        st.session_state.t_data.append(st.session_state.t_full[st.session_state.current_idx])
-        st.session_state.y_data.append(st.session_state.sim_data[st.session_state.current_idx])
-        st.session_state.current_idx += 1
-        # Wait to match FPS
-        time.sleep(1/fps)
-        st.experimental_rerun()
+if st.session_state.running and st.session_state.current_idx < len(st.session_state.sim_data):
+    st.session_state.current_idx += 1
 
 # -------------------------------
 # Plot
 # -------------------------------
 fig, ax = plt.subplots(figsize=(10,4))
-ax.plot(st.session_state.t_data, st.session_state.y_data, lw=2, color='blue', label="Temperature")
+ax.plot(
+    st.session_state.t_data + st.session_state.t_full[:st.session_state.current_idx],
+    st.session_state.y_data + st.session_state.sim_data[:st.session_state.current_idx],
+    lw=2, color='blue', label="Temperature"
+)
 ax.axhline(T_set, color="red", linestyle="--", label="Setpoint")
 ax.set_xlim(0, duration)
-ax.set_ylim(0, max(20, max(st.session_state.y_data)+2 if st.session_state.y_data else 20))
+ax.set_ylim(0, max(20, max(st.session_state.sim_data[:st.session_state.current_idx]+[0])+2))
 ax.set_xlabel("Time [s]")
 ax.set_ylabel("Temperature [°C]")
 ax.grid(True)
@@ -156,16 +157,16 @@ plot_placeholder.pyplot(fig)
 # -------------------------------
 # Metrics
 # -------------------------------
-if st.session_state.y_data:
+if st.session_state.current_idx > 0:
     idx = st.session_state.current_idx - 1
     pwm_placeholder.markdown(f"**PWM:** {st.session_state.pwm_data[idx]:.1f}")
     pwm_bar.progress(int(st.session_state.pwm_data[idx]/255*100))
     elapsed_placeholder.markdown(f"**Time elapsed:** {st.session_state.t_full[idx]} s")
 
-    error = np.array(st.session_state.y_data) - T_set
+    error = np.array(st.session_state.sim_data[:st.session_state.current_idx]) - T_set
     ss_error = np.mean(error[-50:]) if len(error) > 50 else np.mean(error)
     rmse = np.sqrt(np.mean(error**2))
-    settling_time = next((st.session_state.t_data[j] for j in range(len(st.session_state.y_data))
+    settling_time = next((st.session_state.t_full[j] for j in range(st.session_state.current_idx)
                          if np.all(np.abs(error[j:]) <= 0.5)), None)
     recs = []
     if abs(ss_error) > 0.5:
@@ -178,3 +179,9 @@ if st.session_state.y_data:
         f"**Settling time:** {settling_time if settling_time else 'Not reached'} s  \n"
         + ("\n".join(f"- {r}" for r in recs))
     )
+
+# -------------------------------
+# Auto-refresh for smooth simulation
+# -------------------------------
+if st.session_state.running and st.session_state.current_idx < len(st.session_state.sim_data):
+    st.experimental_rerun()
