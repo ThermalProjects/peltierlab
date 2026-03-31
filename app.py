@@ -8,12 +8,12 @@ from peltierlab.core.simulator import Simulator
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 
 # -------------------------------
-# Config
+# Page config
 # -------------------------------
 st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
 
 # -------------------------------
-# Session state
+# Session state (CLAVE)
 # -------------------------------
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -27,18 +27,11 @@ if "idx" not in st.session_state:
 st.sidebar.markdown("## ❄️ PeltierLab Simulator")
 st.sidebar.markdown("---")
 
-sim_type = st.sidebar.radio(
-    "Mode",
-    ["Dynamic", "Static"],
-    horizontal=True
-)
-
+sim_type = st.sidebar.radio("Mode", ["Dynamic", "Static"], horizontal=True)
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
-# -------------------------------
-# Buttons (ONLY dynamic)
-# -------------------------------
+# Dynamic buttons
 if sim_type == "Dynamic":
     col1, col2 = st.sidebar.columns(2)
 
@@ -51,7 +44,7 @@ else:
     st.sidebar.info("Static mode: instant response")
 
 # -------------------------------
-# Defaults
+# Parameters
 # -------------------------------
 best_params = [1.9507, 2.4906, 36.4772, 0.4806, 14.0687, 2.2298, 66.5757, 11.8439]
 T_start = 19.0
@@ -69,21 +62,21 @@ with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
         T_set = st.slider("Setpoint [°C]", 5.0, 18.0, 12.0, 0.1)
         bias = st.slider("Bias [°C]", -2.0, 2.0, 0.0, 0.1)
-        Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
-        Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
-        Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
+        Kp = st.slider("Kp", 0, 200, int(Kp_default))
+        Ki = st.slider("Ki", 0.0, 50.0, Ki_default)
+        Kd = st.slider("Kd", 0.0, 50.0, Kd_default)
 
         if mode == "FOPID":
-            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
-            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
+            lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default)
+            mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default)
 
     else:
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
-        dT1 = st.slider("Upper band (dT1)", 0.1, 1.0, 0.5, 0.1)
-        dT2 = st.slider("Lower band (dT2)", 0.1, 1.0, 0.5, 0.1)
+        dT1 = st.slider("Upper band (dT1)", 0.1, 1.0, 0.5)
+        dT2 = st.slider("Lower band (dT2)", 0.1, 1.0, 0.5)
 
 # -------------------------------
-# Simulation (always full)
+# Simulation (SIEMPRE completa)
 # -------------------------------
 t_full = np.linspace(0, duration, duration + 1)
 
@@ -94,30 +87,26 @@ if mode in ["PID", "FOPID"]:
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
             t_custom=t_full, T_set=T_set,
             Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias,
-            lam=lambda_default, mu=mu_default
+            bias=bias, lam=lambda_default, mu=mu_default
         )
     else:
         Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
             t_custom=t_full, T_set=T_set,
             Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias,
-            lam=lam, mu=mu
+            bias=bias, lam=lam, mu=mu
         )
 
 else:
     sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-    Tc_full, _, _, pwm_full = sim.simulate(
-        t_custom=t_full,
-        T_set=T_set,
-        dT1=dT1, dT2=dT2,
-        P_max=5.0
+    Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
+        t_custom=t_full, T_set=T_set,
+        dT1=dT1, dT2=dT2, P_max=5.0
     )
 
 # -------------------------------
-# PLOT + LOGIC
+# Plot area (MISMA estructura SIEMPRE)
 # -------------------------------
-st.subheader(f"{mode} Simulation")
+st.subheader(f"Results: {mode}")
 
 # -------------------------------
 # STATIC MODE
@@ -140,7 +129,6 @@ if sim_type == "Static":
 # DYNAMIC MODE
 # -------------------------------
 else:
-
     step = 1
 
     if st.session_state.running:
@@ -163,7 +151,7 @@ else:
 
     st.pyplot(fig)
 
-    # Time + PWM
+    # 🔥 Time + PWM recuperados
     st.markdown(f"**Time:** {t_full[i]:.1f} s")
     st.markdown(f"**PWM:** {pwm_full[i]:.1f}")
     st.progress(int(pwm_full[i] / 255 * 100))
@@ -173,7 +161,7 @@ else:
         st.rerun()
 
 # -------------------------------
-# Metrics (always full signal)
+# Metrics (SIEMPRE IGUAL)
 # -------------------------------
 error = Tc_full - T_set
 
@@ -200,13 +188,13 @@ recs = []
 
 if mode in ["PID", "FOPID"]:
     if abs(ss_error) > 0.5:
-        recs.append("Increase Ki")
+        recs.append("Increase Ki to reduce steady-state error")
 
     if overshoot > 1.0:
         recs.append("Reduce Kp or increase Kd")
 
     if settling_time is None or settling_time > 150:
-        recs.append("Increase Kp")
+        recs.append("Increase Kp for faster response")
 
     if rmse > 1.0:
         recs.append("Tune gains globally")
