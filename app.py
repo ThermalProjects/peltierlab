@@ -42,13 +42,14 @@ st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 
+duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+
 # -------------------------------
 # Start / Stop buttons
 # -------------------------------
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
 
-# Coloca los botones Start y Stop en la misma fila
 col1, col2 = st.sidebar.columns(2)
 with col1:
     if st.button("Start"):
@@ -59,14 +60,15 @@ with col2:
 
 running = st.session_state['running_state']
 
-
-# Elapsed time placeholder
+# -------------------------------
+# Elapsed time / PWM placeholders
+# -------------------------------
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
 pwm_bar = st.sidebar.empty()
 
 # -------------------------------
-# Compact sliders
+# Control sliders
 # -------------------------------
 with st.sidebar.expander("Control Parameters", expanded=True):
     if mode in ["PID", "FOPID"]:
@@ -134,15 +136,7 @@ with info_expander:
 # -------------------------------
 # Simulation loop (4 FPS)
 # -------------------------------
-running = False
-if start_stop:
-    running = not running
-
-if 'running_state' not in st.session_state:
-    st.session_state['running_state'] = False
-st.session_state['running_state'] = running
-
-if st.session_state['running_state']:
+if running:
     y_data = []
     t_data = []
     fps = 4
@@ -150,6 +144,9 @@ if st.session_state['running_state']:
     start_time = time.time()
 
     for i in range(len(t_full)):
+        if not st.session_state['running_state']:
+            break  # Detener simulación inmediatamente si se presiona Stop
+
         current_time = time.time()
         elapsed_real = current_time - start_time
         if elapsed_real < t_full[i]:
