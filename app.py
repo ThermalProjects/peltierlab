@@ -173,18 +173,19 @@ if st.session_state['running_state']:
             recs.append("Significant oscillations in steady-state → tune λ/μ (FOPID) or bands dT1/dT2 (Hysteresis).")
 
         # Display metrics + tuning info
-        tuning_info = ""
-        if mode in ["PID", "FOPID"]:
-            tuning_info = (
-                f"**Controller parameters:**  \n"
-                f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}" +
-                (f", λ = {lam:.2f}, μ = {mu:.2f}" if mode=="FOPID" else "") +
-                f"\n**Reference optimal FOPID (PSO):**  \n"
-                f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
-                f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
-            )
-        elif mode=="Hysteresis":
-            tuning_info = f"**Hysteresis bands:** dT1 = {dT1}, dT2 = {dT2}"
+# Display metrics + tuning info
+tuning_info = ""
+if mode in ["PID", "FOPID"]:
+    tuning_info = (
+        f"**Controller parameters:**  \n"
+        f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}" +
+        (f", λ = {lam:.2f}, μ = {mu:.2f}" if mode=="FOPID" else "") +
+        f"\nReference optimal FOPID (PSO):  \n"
+        f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
+        f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
+    )
+elif mode=="Hysteresis":
+    tuning_info = f"**Hysteresis bands:** dT1 = {dT1}, dT2 = {dT2}"
 
         metrics_text.markdown(
             f"**Steady-state error:** {ss_error:.3f} °C  \n"
