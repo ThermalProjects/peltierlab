@@ -44,7 +44,14 @@ st.markdown(
 st.sidebar.header("Settings")
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
+
+if 'running_state' not in st.session_state:
+    st.session_state['running_state'] = False
+
 start_stop = st.sidebar.button("Start/Stop")
+if start_stop:
+    st.session_state['running_state'] = not st.session_state['running_state']
+
 elapsed_placeholder = st.sidebar.empty()
 pwm_placeholder = st.sidebar.empty()
 pwm_bar = st.sidebar.empty()
@@ -116,13 +123,6 @@ with info_expander:
 # -------------------------------
 # Simulation loop (4 FPS)
 # -------------------------------
-running = False
-if start_stop:
-    running = not running
-if 'running_state' not in st.session_state:
-    st.session_state['running_state'] = False
-st.session_state['running_state'] = running
-
 if st.session_state['running_state']:
     y_data = []
     t_data = []
@@ -131,6 +131,9 @@ if st.session_state['running_state']:
     start_time = time.time()
 
     for i in range(len(t_full)):
+        if not st.session_state['running_state']:
+            break  # Stop the loop if button pressed again
+
         current_time = time.time()
         elapsed_real = current_time - start_time
         if elapsed_real < t_full[i]:
@@ -176,7 +179,7 @@ if st.session_state['running_state']:
                 f"**Controller parameters:**  \n"
                 f"Kp = {Kp}, Ki = {Ki}, Kd = {Kd}" +
                 (f", λ = {lam:.2f}, μ = {mu:.2f}" if mode=="FOPID" else "") +
-                "\n**Reference optimal FOPID (PSO):**  \n"
+                f"\n**Reference optimal FOPID (PSO):**  \n"
                 f"Kp = {FOPID_optimal['Kp']}, Ki = {FOPID_optimal['Ki']}, "
                 f"Kd = {FOPID_optimal['Kd']}, λ = {FOPID_optimal['λ']}, μ = {FOPID_optimal['μ']}"
             )
