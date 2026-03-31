@@ -10,10 +10,7 @@ from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 # -------------------------------
 # Page config
 # -------------------------------
-st.set_page_config(
-    page_title="PeltierLab Simulator",
-    layout="wide"
-)
+st.set_page_config(page_title="PeltierLab Simulator", layout="wide")
 
 # -------------------------------
 # Global parameters
@@ -31,24 +28,14 @@ mu_default = 1.47
 # Title
 # -------------------------------
 st.title("❄️ PeltierLab Interactive Simulator")
-st.markdown(
-    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
-)
+st.markdown("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
 
 # -------------------------------
-# SIDEBAR (controls)
+# Sidebar (controls)
 # -------------------------------
 st.sidebar.header("Settings")
-
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
-start_stop = st.sidebar.button("Start/Stop")
-
-# Elapsed time placeholder
-elapsed_placeholder = st.sidebar.empty()
-pwm_placeholder = st.sidebar.empty()
-pwm_bar = st.sidebar.empty()
 
 # -------------------------------
 # Compact sliders
@@ -60,18 +47,16 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
         Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-
     elif mode == "Hysteresis":
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Prepare simulation data
+# Initialize simulation
 # -------------------------------
 t_full = np.linspace(0, duration, duration + 1)
 
@@ -109,24 +94,25 @@ ax.grid(True, lw=0.5)
 ax.legend(fontsize=7)
 plot_placeholder = st.pyplot(fig)
 
-# -------------------------------
-# Metrics & recommendations
-# -------------------------------
+# Metrics & info
 info_expander = st.expander("Model Information & Metrics", expanded=True)
-with info_expander:
-    metrics_text = st.empty()
+metrics_text = info_expander.empty()
+elapsed_placeholder = st.sidebar.empty()
+pwm_placeholder = st.sidebar.empty()
+pwm_bar = st.sidebar.empty()
 
 # -------------------------------
-# Simulation loop (4 FPS)
+# Start/Stop toggle
 # -------------------------------
-running = False
-if start_stop:
-    running = not running
-
 if 'running_state' not in st.session_state:
     st.session_state['running_state'] = False
-st.session_state['running_state'] = running
 
+if st.sidebar.button("Start/Stop"):
+    st.session_state['running_state'] = not st.session_state['running_state']
+
+# -------------------------------
+# Simulation loop
+# -------------------------------
 if st.session_state['running_state']:
     y_data = []
     t_data = []
@@ -143,21 +129,17 @@ if st.session_state['running_state']:
         y_data.append(Tc_full[i])
         t_data.append(t_full[i])
 
-        # Update line
+        # Update plot
         line.set_data(t_data, y_data)
         ax.set_xlim(0, duration)
         plot_placeholder.pyplot(fig)
 
-        # Update time elapsed
+        # Update side info
         elapsed_placeholder.markdown(f"**Time elapsed:** {int(t_full[i])} s")
-
-        # Update PWM
         pwm_placeholder.markdown(f"**PWM:** {pwm_full[i]:.1f}")
         pwm_bar.progress(int(pwm_full[i]/255*100))
 
-        # -------------------------------
-        # Metrics calculation
-        # -------------------------------
+        # Metrics
         error = T_set - np.array(y_data)
         Tmin = np.min(np.array(y_data))
         undershoot = max(0.0, T_set - Tmin)
