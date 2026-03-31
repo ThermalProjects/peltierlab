@@ -41,7 +41,6 @@ st.markdown(
 st.sidebar.header("Settings")
 
 mode = st.sidebar.selectbox("Control mode", ["PID", "FOPID", "Hysteresis"])
-
 duration = st.sidebar.slider("Simulation duration [s]", 100, 500, 300, step=10)
 
 # -------------------------------
@@ -77,38 +76,38 @@ with st.sidebar.expander("Control Parameters", expanded=True):
         Kp = st.slider("Kp", 0, 200, int(Kp_default), 1)
         Ki = st.slider("Ki", 0.0, 50.0, Ki_default, 0.1)
         Kd = st.slider("Kd", 0.0, 50.0, Kd_default, 0.1)
-
         if mode == "FOPID":
             lam = st.slider("Lambda (λ)", 0.1, 2.0, lambda_default, 0.01)
             mu = st.slider("Mu (μ)", 0.1, 2.0, mu_default, 0.01)
-
-    elif mode == "Hysteresis":
+    else:  # Hysteresis
         T_set = st.slider("Setpoint [°C]", 10.0, 18.0, 12.0, 0.1)
         dT1 = st.slider("Upper band (dT1) [°C]", 0.1, 1.0, 0.5, 0.1)
         dT2 = st.slider("Lower band (dT2) [°C]", 0.1, 1.0, 0.5, 0.1)
 
 # -------------------------------
-# Prepare simulation data
+# Prepare simulation data (but don't run)
 # -------------------------------
-if mode in ["PID", "FOPID"]:
-    sim = Simulator(best_params, T_start=T_start)
+if 'simulation_data' not in st.session_state:
+    st.session_state['simulation_data'] = {}
+
+if mode not in st.session_state['simulation_data']:
     t_full = np.linspace(0, duration, duration + 1)
-    if mode == "PID":
-        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lambda_default, mu=mu_default
-        )
-    else:
-        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
-            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
-            bias=bias, lam=lam, mu=mu
-        )
-elif mode == "Hysteresis":
-    sim = SimulatorHysteresisReal(best_params, T_start=T_start)
-    t_full = np.linspace(0, duration, duration + 1)
-    Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
-        t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
-    )
+    if mode in ["PID", "FOPID"]:
+        sim = Simulator(best_params, T_start=T_start)
+        st.session_state['simulation_data'][mode] = {
+            't_full': t_full,
+            'sim': sim
+        }
+    else:  # Hysteresis
+        sim = SimulatorHysteresisReal(best_params, T_start=T_start)
+        st.session_state['simulation_data'][mode] = {
+            't_full': t_full,
+            'sim': sim
+        }
+
+sim_data = st.session_state['simulation_data'][mode]
+t_full = sim_data['t_full']
+sim = sim_data['sim']
 
 # -------------------------------
 # Plot placeholders
@@ -134,9 +133,25 @@ with info_expander:
     metrics_text = st.empty()
 
 # -------------------------------
-# Simulation loop (4 FPS)
+# Simulation loop (solo si se presiona Start)
 # -------------------------------
 if running:
+    # Preparar datos según modo
+    if mode == "PID":
+        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
+            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+            bias=bias, lam=lambda_default, mu=mu_default
+        )
+    elif mode == "FOPID":
+        Tc_full, pwm_full = sim.simulate_3nodes_FOPID(
+            t_custom=t_full, T_set=T_set, Kp=Kp, Ki=Ki, Kd=Kd,
+            bias=bias, lam=lam, mu=mu
+        )
+    else:  # Hysteresis
+        Tc_full, Tm_full, Th_full, pwm_full = sim.simulate(
+            t_custom=t_full, T_set=T_set, dT1=dT1, dT2=dT2, P_max=5.0
+        )
+
     y_data = []
     t_data = []
     fps = 4
@@ -145,7 +160,7 @@ if running:
 
     for i in range(len(t_full)):
         if not st.session_state['running_state']:
-            break  # Detener simulación inmediatamente si se presiona Stop
+            break  # Detener simulación si se presiona Stop
 
         current_time = time.time()
         elapsed_real = current_time - start_time
