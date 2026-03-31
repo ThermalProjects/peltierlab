@@ -40,7 +40,7 @@ st.sidebar.header("Settings")
 # 🔥 NEW: Dynamic / Static
 sim_type = st.sidebar.radio(
     "Simulation mode",
-    ["Dynamic", "Static"]
+    ["Dynamic", "Static"],
         horizontal=True
 )
 
