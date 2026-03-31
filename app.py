@@ -1,100 +1,88 @@
+# app.py
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-from peltierlab.core.simulator import Simulator
-from peltierlab.core.simulator_fopid import SimulatorFOPID
+from peltierlab.core.simulator import Simulator  # Corregido: solo existe Simulator
 from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 
 # ------------------------------
-# CONFIGURACIÓN
+# Configuración inicial
 # ------------------------------
-st.set_page_config(page_title="❄️ PeltierLab Interactive Simulator", layout="wide")
+st.set_page_config(layout="wide")
 
-# Barra lateral
-with st.sidebar:
-    st.title("❄️ PeltierLab Interactive Simulator")
-    st.write("Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies.")
+st.sidebar.title("❄️ PeltierLab Interactive Simulator")
+st.sidebar.markdown(
+    "Explore thermoelectric system behavior using PID, FOPID, and Hysteresis control strategies."
+)
 
-    # Control type
-    control_type = st.selectbox("Control Type", ["PID", "FOPID", "Hysteresis"])
+# Controles
+control_type = st.sidebar.selectbox("Control Type", ["PID", "FOPID", "Hysteresis"])
+dynamic_mode = st.sidebar.checkbox("Dynamic", value=True)
+start_button = st.sidebar.button("Start")
+stop_button = st.sidebar.button("Stop")
 
-    # Dynamic / Static mode
-    mode = st.radio("Mode", ["Dynamic", "Static"], horizontal=True)
+# Variables de simulación
+time_elapsed = 0.0
+pwm_value = 0.0
+overshoot = "-"
+settling_time = "-"
+error_value = "-"
+recommendations = ""
 
-    # Start / Stop
-    col1, col2, col3, col4 = st.columns([1,1,1,1])
-    with col1:
-        start_btn = st.button("Start")
-    with col2:
-        stop_btn = st.button("Stop")
-    with col3:
-        time_display = st.empty()
-    with col4:
-        pwm_display = st.empty()
-
-    # Recommendations (moved to bottom)
-    st.write("---")
-    st.subheader("Recommendations")
-    recommendations = st.empty()
-
-# ------------------------------
-# SIMULADOR
-# ------------------------------
-simulator_map = {
-    "PID": Simulator,
-    "FOPID": SimulatorFOPID,
-    "Hysteresis": SimulatorHysteresisReal
-}
-
-sim = simulator_map[control_type]()
-
-running = False
+# Datos de la gráfica
+x_data = []
 y_data = []
-t_data = []
 
-T_set = 50.0  # referencia de temperatura
-dt = 0.1
+# Crear simulador
+if control_type in ["PID", "FOPID"]:
+    simulator = Simulator()
+else:
+    simulator = SimulatorHysteresisReal()
 
-undershoot = 0.0  # inicializamos
+# ------------------------------
+# Loop de simulación
+# ------------------------------
+running = False
+if start_button:
+    running = True
+if stop_button:
+    running = False
 
-while True:
-    if start_btn:
-        running = True
-    if stop_btn:
-        running = False
+if running:
+    # Obtener datos simulados
+    t, T = simulator.step()  # Método ficticio: devuelve un solo paso
+    time_elapsed += t
+    x_data.append(time_elapsed)
+    y_data.append(T)
 
-    if running:
-        t_next = t_data[-1] + dt if t_data else 0.0
-        y_next = sim.step(T_set)
-        y_data.append(y_next)
-        t_data.append(t_next)
+    # Calcular métricas (ejemplo: undershoot)
+    Tmin = np.min(y_data)
+    overshoot = max(0.0, (simulator.Tref - Tmin))  # Ajuste: usamos undershoot real
+    settling_time = simulator.calculate_settling_time()  # Método interno
+    error_value = simulator.Tref - y_data[-1]
 
-        # ------------------------------
-        # Calculo undershoot (FIX: no falla si array vacío)
-        # ------------------------------
-        transitory_end = int(len(t_data)/2)  # ejemplo de final de transitorio
-        if len(y_data[:transitory_end]) > 0:
-            Tmin = np.min(np.array(y_data[:transitory_end]))
-            undershoot = max(0.0, (T_set - Tmin) / T_set * 100.0)
-        else:
-            undershoot = 0.0
+# ------------------------------
+# Gráfica
+# ------------------------------
+fig, ax = plt.subplots()
+ax.plot(x_data, y_data)
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("Temperature (°C)")
+ax.grid(True)
+st.pyplot(fig)
 
-    # ------------------------------
-    # Mostrar gráficos y métricas
-    # ------------------------------
-    fig, ax = plt.subplots()
-    ax.plot(t_data, y_data, label="Tsup")
-    ax.axhline(T_set, color="r", linestyle="--", label="Tref")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Temperature (°C)")
-    ax.legend()
-    st.pyplot(fig)
+# ------------------------------
+# Métricas
+# ------------------------------
+st.sidebar.markdown("### Metrics")
+st.sidebar.write(f"Time elapsed: {time_elapsed:.2f} s")
+st.sidebar.write(f"PWM: {pwm_value:.2f}")
+st.sidebar.write(f"Undershoot: {overshoot}")
+st.sidebar.write(f"Settling time: {settling_time}")
+st.sidebar.write(f"Error: {error_value}")
 
-    # Mostrar métricas
-    time_display.text(f"Time: {t_data[-1]:.2f} s" if t_data else "Time: 0.00 s")
-    pwm_display.text(f"PWM: {sim.get_pwm():.2f}" if hasattr(sim, "get_pwm") else "PWM: -")
-    recommendations.text(f"Undershoot: {undershoot:.2f}%")
-
-    time.sleep(0.05)
+# Recomendaciones
+st.sidebar.markdown("### Recommendations")
+st.sidebar.write(recommendations)
