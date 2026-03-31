@@ -12,7 +12,7 @@ from peltierlab.core.simulator_hysteresis_real import SimulatorHysteresisReal
 # -------------------------------
 st.set_page_config(
     page_title="PeltierLab Simulator",
-    layout="wide"
+    layout="wide" 
 )
 
 # -------------------------------
