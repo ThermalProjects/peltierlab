@@ -1,13 +1,13 @@
 ❄️ PeltierLab
 Thermal simulation of Peltier systems with:
-PID
-FOPID
-Hysteresis
+- Hysteresis
+- PID
+- FOPID
 
 Run Online here:
 https://thermalcontrol.streamlit.app/
 
 Notebooks:
-examples/hyster.ipynb
-examples/pid.ipynb
-examples/fopid.ipynb
+mode/hyster.ipynb
+mode/pid.ipynb
+mode/fopid.ipynb
